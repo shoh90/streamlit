@@ -108,13 +108,26 @@ with tab5:
     st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
 
 with tab6:
-    st.subheader("🍊 감귤 재배 적합일자 지도 (고도화)")
+    st.subheader("🍊 감귤 재배 적합 지도 (월별 평균 기준)")
 
-    # 날짜 선택 위젯
-    selected_date = st.date_input("날짜를 선택하세요", df['일시'].max().date())
+    # 월 선택 위젯
+    selected_month = st.selectbox(
+        "월을 선택하세요",
+        sorted(df['일시'].dt.to_period('M').unique().astype(str)),
+        index=-1
+    )
 
-    # 선택한 날짜 기준 필터링
-    df_selected = df[df['일시'].dt.date == selected_date]
+    # 선택한 월 기준 필터링
+    df['연월'] = df['일시'].dt.to_period('M').astype(str)
+    df_selected = df[df['연월'] == selected_month]
+
+    # 월별 평균값 계산 (지점별)
+    df_monthly = df_selected.groupby('지점명').agg({
+        '평균기온(°C)': 'mean',
+        '평균 상대습도(%)': 'mean',
+        '일강수량(mm)': 'mean',
+        '평균 풍속(m/s)': 'mean'
+    }).reset_index()
 
     # 지도 초기화
     fmap = folium.Map(location=[34.0, 126.5], zoom_start=8)
@@ -122,22 +135,21 @@ with tab6:
     from folium.plugins import MarkerCluster
     marker_cluster = MarkerCluster().add_to(fmap)
 
-    # 지점별 최신 데이터 표시
+    # 지점별 월평균값 지도 표시
     for station in stations:
         name, lat, lon = station['name'], station['lat'], station['lon']
 
-        # 지점명 매칭 데이터 필터링
-        latest_data = df_selected[df_selected['지점명'] == name]
-        if latest_data.empty:
+        station_data = df_monthly[df_monthly['지점명'] == name]
+        if station_data.empty:
             continue
 
-        latest_data = latest_data.iloc[0]
-        temp = latest_data['평균기온(°C)']
-        humid = latest_data['평균 상대습도(%)']
-        rain = latest_data['일강수량(mm)']
-        wind = latest_data['평균 풍속(m/s)']
+        data = station_data.iloc[0]
+        temp = data['평균기온(°C)']
+        humid = data['평균 상대습도(%)']
+        rain = data['일강수량(mm)']
+        wind = data['평균 풍속(m/s)']
 
-        # 감귤 적합도 판단
+        # 감귤 적합도 판별 (기온+습도)
         suitable = (12 <= temp <= 18) and (60 <= humid <= 85)
         water_alert = rain == 0
         wind_alert = wind >= 14
@@ -161,7 +173,7 @@ with tab6:
 
         # Tooltip 구성
         tooltip = f"""
-        <b>{name}</b> ({selected_date})<br>
+        <b>{name}</b> ({selected_month})<br>
         🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
         {"✅ 감귤 재배 적합" if suitable else "❌ 부적합"}<br>
         {"<br>".join(reasons) if not suitable else ""}
@@ -169,7 +181,6 @@ with tab6:
         {"⚠️ 강풍 주의" if wind_alert else ""}
         """
 
-        # 마커 표시
         folium.CircleMarker(
             location=[lat, lon],
             radius=10,
@@ -179,7 +190,8 @@ with tab6:
             popup=folium.Popup(tooltip, max_width=300)
         ).add_to(marker_cluster)
 
-    # Streamlit에 지도 렌더링
+    # 지도 출력
     html(fmap._repr_html_(), height=550, width=750)
+
 
 
