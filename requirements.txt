@@ -1,2 +1,5 @@
+streamlit==1.35.0
+pandas
+sqlite3
 plotly
 folium
