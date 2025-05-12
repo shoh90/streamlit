@@ -70,15 +70,15 @@ with tab2:
         st.error("월별 데이터를 불러오지 못했습니다. 데이터를 확인하세요.")
         st.stop()
 
-    # 월 선택 위젯
+    # 월 선택 위젯 (tab2 전용 key)
     selected_month_tab2 = st.selectbox(
-    "월을 선택하세요",
-    month_options,
-    index=len(month_options) - 1,
-    key="tab2_month_select"
+        "월을 선택하세요",
+        month_options,
+        index=len(month_options) - 1,
+        key="tab2_month_select"
     )
 
-    # 월 기준 데이터 필터링
+    # 선택한 월 기준 필터링
     df['연월'] = df['일시'].dt.to_period('M').astype(str)
     df_selected_tab2 = df[df['연월'] == selected_month_tab2]
 
@@ -91,13 +91,13 @@ with tab2:
     }).reset_index()
 
     # 감귤 적합 기준 필터링 (기온+습도)
-    citrus_df = df_monthly[
-        (df_monthly['평균기온(°C)'].between(12, 18)) &
-        (df_monthly['평균 상대습도(%)'].between(60, 85))
+    citrus_df_tab2 = df_monthly_tab2[
+        (df_monthly_tab2['평균기온(°C)'].between(12, 18)) &
+        (df_monthly_tab2['평균 상대습도(%)'].between(60, 85))
     ]
 
-    st.subheader(f"📅 {selected_month} 감귤 재배 적합 지점")
-    st.dataframe(citrus_df)
+    st.subheader(f"📅 {selected_month_tab2} 감귤 재배 적합 지점")
+    st.dataframe(citrus_df_tab2)
 
 with tab3:
     st.subheader("🌵 이상기후 경고 (5일 무강수 + 고온 + 강풍)")
@@ -143,23 +143,14 @@ with tab5:
 with tab6:
     st.subheader("🍊 감귤 재배 적합 지도 (월별 평균 기준)")
 
-    # 월 리스트 생성
-    month_options = sorted(df['일시'].dt.to_period('M').unique().astype(str))
-
-    if not month_options:
-        st.error("월별 데이터를 불러오지 못했습니다. 데이터를 확인하세요.")
-        st.stop()
-
-    # 월 선택 위젯
+    # 월 선택 위젯 (tab6 전용 key)
     selected_month_tab6 = st.selectbox(
-    "월을 선택하세요",
-    month_options,
-    index=len(month_options) - 1,
-    key="tab6_month_select"
+        "월을 선택하세요",
+        month_options,
+        index=len(month_options) - 1,
+        key="tab6_month_select"
     )
 
-    # 선택한 월 기준 필터링
-    df['연월'] = df['일시'].dt.to_period('M').astype(str)
     df_selected_tab6 = df[df['연월'] == selected_month_tab6]
 
     # 월별 평균값 계산 (지점별)
@@ -172,15 +163,14 @@ with tab6:
 
     # 지도 초기화
     fmap = folium.Map(location=[34.0, 126.5], zoom_start=8)
-
     from folium.plugins import MarkerCluster
     marker_cluster = MarkerCluster().add_to(fmap)
 
-    # 지점별 월평균값 지도 표시
+    # 지도 마커 생성
     for station in stations:
         name, lat, lon = station['name'], station['lat'], station['lon']
 
-        station_data = df_monthly[df_monthly['지점명'] == name]
+        station_data = df_monthly_tab6[df_monthly_tab6['지점명'] == name]
         if station_data.empty:
             continue
 
@@ -210,7 +200,7 @@ with tab6:
             color = 'gray'
 
         tooltip = f"""
-        <b>{name}</b> ({selected_month} 평균)<br>
+        <b>{name}</b> ({selected_month_tab6} 평균)<br>
         🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
         {"✅ 감귤 재배 적합" if suitable else "❌ 부적합"}<br>
         {"<br>".join(reasons) if not suitable else ""}
@@ -228,3 +218,4 @@ with tab6:
         ).add_to(marker_cluster)
 
     html(fmap._repr_html_(), height=550, width=750)
+
