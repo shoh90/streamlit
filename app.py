@@ -110,11 +110,18 @@ with tab5:
 with tab6:
     st.subheader("🍊 감귤 재배 적합 지도 (월별 평균 기준)")
 
+    # 월 리스트 생성
+    month_options = sorted(df['일시'].dt.to_period('M').unique().astype(str))
+
+    if not month_options:
+        st.error("월별 데이터를 불러오지 못했습니다. 데이터를 확인하세요.")
+        st.stop()
+
     # 월 선택 위젯
     selected_month = st.selectbox(
         "월을 선택하세요",
-        sorted(df['일시'].dt.to_period('M').unique().astype(str)),
-        index=-1
+        month_options,
+        index=len(month_options) - 1  # 최신 월을 기본 선택
     )
 
     # 선택한 월 기준 필터링
@@ -149,19 +156,16 @@ with tab6:
         rain = data['일강수량(mm)']
         wind = data['평균 풍속(m/s)']
 
-        # 감귤 적합도 판별 (기온+습도)
         suitable = (12 <= temp <= 18) and (60 <= humid <= 85)
         water_alert = rain == 0
         wind_alert = wind >= 14
 
-        # 부적합 사유 명시
         reasons = []
         if not (12 <= temp <= 18):
             reasons.append(f"기온 {temp:.1f}℃ (12~18℃ 범위 벗어남)")
         if not (60 <= humid <= 85):
             reasons.append(f"습도 {humid:.1f}% (60~85% 범위 벗어남)")
 
-        # 색상 결정
         if wind_alert:
             color = 'red'
         elif water_alert:
@@ -171,7 +175,6 @@ with tab6:
         else:
             color = 'gray'
 
-        # Tooltip 구성
         tooltip = f"""
         <b>{name}</b> ({selected_month} 평균)<br>
         🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
@@ -181,7 +184,6 @@ with tab6:
         {"⚠️ 강풍 주의" if wind_alert else ""}
         """
 
-        # 마커 생성
         folium.CircleMarker(
             location=[lat, lon],
             radius=10,
@@ -191,5 +193,4 @@ with tab6:
             popup=folium.Popup(tooltip, max_width=300)
         ).add_to(marker_cluster)
 
-    # 지도 출력
     html(fmap._repr_html_(), height=550, width=750)
