@@ -106,11 +106,15 @@ with tab5:
     st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
 
 with tab6:
-    st.subheader("🗺️ 제주 주요 지점 기후 지도")
+    st.subheader("🗺️ 제주 주요 지점 기후 지도 (고도화 버전)")
+
     latest = df['일시'].max()
     df_latest = df[df['일시'] == latest]
 
     fmap = folium.Map(location=[33.37, 126.55], zoom_start=10)
+
+    from folium.plugins import MarkerCluster
+    marker_cluster = MarkerCluster().add_to(fmap)
 
     for station in stations:
         name, lat, lon = station['name'], station['lat'], station['lon']
@@ -121,14 +125,38 @@ with tab6:
         temp = latest_data['평균기온(°C)']
         humid = latest_data['평균 상대습도(%)']
         rain = latest_data['일강수량(mm)']
+        wind = latest_data['평균 풍속(m/s)']
 
-        tooltip = f"{name}<br>{latest.strftime('%Y-%m-%d')}<br>🌡 {temp}°C<br>💧 {humid}%<br>☔ {rain}mm"
-        color = 'green' if (12 <= temp <= 18 and 60 <= humid <= 85) else 'gray'
+        # 경고 판단
+        suitable = (12 <= temp <= 18) and (60 <= humid <= 85)
+        water_alert = rain == 0
+        wind_alert = wind >= 14
 
+        # 색상 결정
+        if wind_alert:
+            color = 'red'
+        elif water_alert:
+            color = 'orange'
+        elif suitable:
+            color = 'green'
+        else:
+            color = 'gray'
+
+        # Tooltip 구성
+        tooltip = f"""
+        <b>{name}</b> ({latest_data['일시'].date()})<br>
+        🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
+        {"✅ 감귤 재배 적합" if suitable else "❌ 부적합"}<br>
+        {"⚠️ 관수 필요" if water_alert else ""}{" | " if water_alert and wind_alert else ""}
+        {"⚠️ 강풍 주의" if wind_alert else ""}
+        """
+
+        # CircleMarker with Cluster
         folium.CircleMarker(
             location=[lat, lon],
             radius=10, color=color, fill=True,
-            popup=tooltip, fill_opacity=0.8
-        ).add_to(fmap)
+            fill_opacity=0.8,
+            popup=folium.Popup(tooltip, max_width=300)
+        ).add_to(marker_cluster)
 
     html(fmap._repr_html_(), height=550, width=750)
