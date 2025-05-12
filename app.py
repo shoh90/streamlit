@@ -106,7 +106,7 @@ with tab5:
     st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
 
 with tab6:
-    st.subheader("🗺️ 제주 주요 지점 기후 지도 (고도화 버전)")
+    st.subheader("🗺️ 제주 주요 지점 기후 지도")
 
     latest = df['일시'].max()
     df_latest = df[df['일시'] == latest]
