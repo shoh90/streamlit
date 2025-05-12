@@ -76,7 +76,8 @@ with tab2:
     month_options,
     index=len(month_options) - 1,
     key="tab2_month_select"
-)
+    )
+
 
     # 월 기준 데이터 필터링
     df['연월'] = df['일시'].dt.to_period('M').astype(str)
@@ -152,10 +153,10 @@ with tab6:
 
     # 월 선택 위젯
     selected_month_tab6 = st.selectbox(
-        "월을 선택하세요",
-        month_options,
-        index=len(month_options) - 1  # 최신 월을 기본 선택
-        key="tab6_month_select"
+    "월을 선택하세요",
+    month_options,
+    index=len(month_options) - 1,
+    key="tab6_month_select"
     )
 
     # 선택한 월 기준 필터링
