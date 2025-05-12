@@ -106,7 +106,7 @@ with tab5:
     for alert in alerts:
         st.warning(alert)
     st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
-
+    
 with tab6:
     st.subheader("🍊 감귤 재배 적합 지도 (월별 평균 기준)")
 
@@ -192,6 +192,3 @@ with tab6:
 
     # 지도 출력
     html(fmap._repr_html_(), height=550, width=750)
-
-
-
