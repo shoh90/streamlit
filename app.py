@@ -8,7 +8,7 @@ from streamlit.components.v1 import html
 # 데이터 로딩 함수
 @st.cache_data
 def load_data():
-    conn = sqlite3.connect("asos_weather.db")
+    conn = sqlite3.connect("data/asos_weather.db")
     df = pd.read_sql("SELECT * FROM asos_weather", conn)
     conn.close()
 
@@ -20,8 +20,15 @@ def load_data():
     df[rain_col] = pd.to_numeric(df[rain_col], errors='coerce')
     df = df.rename(columns={rain_col: '일강수량(mm)'})
 
-    df['평균 상대습도(%)'] = pd.to_numeric(df['평균 상대습도(%)'], errors='coerce')
-    df['평균 풍속(m/s)'] = pd.to_numeric(df['평균 풍속(m/s)'], errors='coerce')
+    # 습도 컬럼명 자동 탐지
+    humid_col = [col for col in df.columns if '습도' in col][0]
+    df[humid_col] = pd.to_numeric(df[humid_col], errors='coerce')
+    df = df.rename(columns={humid_col: '평균 상대습도(%)'})
+
+    # 풍속 컬럼명 자동 탐지
+    wind_col = [col for col in df.columns if '풍속' in col][0]
+    df[wind_col] = pd.to_numeric(df[wind_col], errors='coerce')
+    df = df.rename(columns={wind_col: '평균 풍속(m/s)'})
 
     return df.dropna(subset=['일시'])
 
