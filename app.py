@@ -108,34 +108,46 @@ with tab5:
     st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
 
 with tab6:
-    st.subheader("🗺️ 제주·남도 주요 지점 기후 지도 (고도화)")
+    st.subheader("🍊 감귤 재배 적합일자 지도 (고도화)")
 
-    latest = df['일시'].max()
-    df_latest = df[df['일시'] == latest]
+    # 날짜 선택 위젯
+    selected_date = st.date_input("날짜를 선택하세요", df['일시'].max().date())
 
+    # 선택한 날짜 기준 필터링
+    df_selected = df[df['일시'].dt.date == selected_date]
+
+    # 지도 초기화
     fmap = folium.Map(location=[34.0, 126.5], zoom_start=8)
 
     from folium.plugins import MarkerCluster
     marker_cluster = MarkerCluster().add_to(fmap)
 
+    # 지점별 최신 데이터 표시
     for station in stations:
         name, lat, lon = station['name'], station['lat'], station['lon']
-        
-        # 지점별 최신 데이터만 필터링
-        latest_data = df_latest[df_latest['지점명'] == name]
+
+        # 지점명 매칭 데이터 필터링
+        latest_data = df_selected[df_selected['지점명'] == name]
         if latest_data.empty:
             continue
-        
+
         latest_data = latest_data.iloc[0]
         temp = latest_data['평균기온(°C)']
         humid = latest_data['평균 상대습도(%)']
         rain = latest_data['일강수량(mm)']
         wind = latest_data['평균 풍속(m/s)']
 
-        # 적합도 및 경고 판단
+        # 감귤 적합도 판단
         suitable = (12 <= temp <= 18) and (60 <= humid <= 85)
         water_alert = rain == 0
         wind_alert = wind >= 14
+
+        # 부적합 사유 명시
+        reasons = []
+        if not (12 <= temp <= 18):
+            reasons.append(f"기온 {temp:.1f}℃ (12~18℃ 범위 벗어남)")
+        if not (60 <= humid <= 85):
+            reasons.append(f"습도 {humid:.1f}% (60~85% 범위 벗어남)")
 
         # 색상 결정
         if wind_alert:
@@ -147,22 +159,27 @@ with tab6:
         else:
             color = 'gray'
 
-        # Tooltip
+        # Tooltip 구성
         tooltip = f"""
-        <b>{name}</b> ({latest_data['일시'].date()})<br>
+        <b>{name}</b> ({selected_date})<br>
         🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
         {"✅ 감귤 재배 적합" if suitable else "❌ 부적합"}<br>
+        {"<br>".join(reasons) if not suitable else ""}
         {"⚠️ 관수 필요" if water_alert else ""}{" | " if water_alert and wind_alert else ""}
         {"⚠️ 강풍 주의" if wind_alert else ""}
         """
 
-        # CircleMarker 추가
+        # 마커 표시
         folium.CircleMarker(
             location=[lat, lon],
-            radius=10, color=color, fill=True,
+            radius=10,
+            color=color,
+            fill=True,
             fill_opacity=0.8,
             popup=folium.Popup(tooltip, max_width=300)
         ).add_to(marker_cluster)
 
+    # Streamlit에 지도 렌더링
     html(fmap._repr_html_(), height=550, width=750)
+
 
