@@ -113,7 +113,7 @@ with tab6:
     latest = df['일시'].max()
     df_latest = df[df['일시'] == latest]
 
-    fmap = folium.Map(location=[33.37, 126.55], zoom_start=10)
+    fmap = folium.Map(location=[34.0, 126.5], zoom_start=8)
 
     from folium.plugins import MarkerCluster
     marker_cluster = MarkerCluster().add_to(fmap)
