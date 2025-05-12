@@ -83,7 +83,7 @@ with tab2:
     df_selected_tab2 = df[df['연월'] == selected_month_tab2]
 
     # 월별 평균값 계산 (지점별)
-    df_monthly_tab2 = df_selected.groupby('지점명').agg({
+    df_monthly_tab2 = df_selected_tab2.groupby('지점명').agg({
         '평균기온(°C)': 'mean',
         '평균 상대습도(%)': 'mean',
         '일강수량(mm)': 'mean',
@@ -163,7 +163,7 @@ with tab6:
     df_selected_tab6 = df[df['연월'] == selected_month_tab6]
 
     # 월별 평균값 계산 (지점별)
-    df_monthly_tab6 = df_selected.groupby('지점명').agg({
+    df_monthly_tab6 = df_selected_tab6.groupby('지점명').agg({
         '평균기온(°C)': 'mean',
         '평균 상대습도(%)': 'mean',
         '일강수량(mm)': 'mean',
