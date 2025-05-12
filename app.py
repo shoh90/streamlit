@@ -173,7 +173,7 @@ with tab6:
 
         # Tooltip 구성
         tooltip = f"""
-        <b>{name}</b> ({selected_month})<br>
+        <b>{name}</b> ({selected_month} 평균)<br>
         🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
         {"✅ 감귤 재배 적합" if suitable else "❌ 부적합"}<br>
         {"<br>".join(reasons) if not suitable else ""}
@@ -181,6 +181,7 @@ with tab6:
         {"⚠️ 강풍 주의" if wind_alert else ""}
         """
 
+        # 마커 생성
         folium.CircleMarker(
             location=[lat, lon],
             radius=10,
