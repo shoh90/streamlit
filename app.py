@@ -8,7 +8,7 @@ from streamlit.components.v1 import html
 # 데이터 로딩 함수
 @st.cache_data
 def load_data():
-    conn = sqlite3.connect("data/asos_weather.db")
+    conn = sqlite3.connect("asos_weather.db")
     df = pd.read_sql("SELECT * FROM asos_weather", conn)
     conn.close()
 
