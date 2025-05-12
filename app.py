@@ -61,9 +61,41 @@ with tab1:
         st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("🍊 감귤 재배 적합 일자")
-    cond = df['평균기온(°C)'].between(12, 18) & df['평균 상대습도(%)'].between(60, 85)
-    citrus_df = df[cond][['일시', '지점명', '평균기온(°C)', '평균 상대습도(%)']]
+    st.subheader("🍊 감귤 재배 적합 월별 평균 일자")
+
+    # 월 리스트 생성
+    month_options = sorted(df['일시'].dt.to_period('M').unique().astype(str))
+
+    if not month_options:
+        st.error("월별 데이터를 불러오지 못했습니다. 데이터를 확인하세요.")
+        st.stop()
+
+    # 월 선택 위젯
+    selected_month = st.selectbox(
+        "월을 선택하세요",
+        month_options,
+        index=len(month_options) - 1
+    )
+
+    # 월 기준 데이터 필터링
+    df['연월'] = df['일시'].dt.to_period('M').astype(str)
+    df_selected = df[df['연월'] == selected_month]
+
+    # 월별 평균값 계산 (지점별)
+    df_monthly = df_selected.groupby('지점명').agg({
+        '평균기온(°C)': 'mean',
+        '평균 상대습도(%)': 'mean',
+        '일강수량(mm)': 'mean',
+        '평균 풍속(m/s)': 'mean'
+    }).reset_index()
+
+    # 감귤 적합 기준 필터링 (기온+습도)
+    citrus_df = df_monthly[
+        (df_monthly['평균기온(°C)'].between(12, 18)) &
+        (df_monthly['평균 상대습도(%)'].between(60, 85))
+    ]
+
+    st.subheader(f"📅 {selected_month} 감귤 재배 적합 지점")
     st.dataframe(citrus_df)
 
 with tab3:
