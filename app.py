@@ -106,7 +106,7 @@ with tab5:
     st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
 
 with tab6:
-    st.subheader("🗺️ 제주 주요 지점 기후 지도")
+    st.subheader("🗺️ 제주·남도 주요 지점 기후 지도 (고도화)")
 
     latest = df['일시'].max()
     df_latest = df[df['일시'] == latest]
@@ -118,16 +118,19 @@ with tab6:
 
     for station in stations:
         name, lat, lon = station['name'], station['lat'], station['lon']
-        latest_data = df_latest[df_latest['지점명'] == name].iloc[0] if name in df_latest['지점명'].values else None
-        if latest_data is None:
+        
+        # 지점별 최신 데이터만 필터링
+        latest_data = df_latest[df_latest['지점명'] == name]
+        if latest_data.empty:
             continue
-
+        
+        latest_data = latest_data.iloc[0]
         temp = latest_data['평균기온(°C)']
         humid = latest_data['평균 상대습도(%)']
         rain = latest_data['일강수량(mm)']
         wind = latest_data['평균 풍속(m/s)']
 
-        # 경고 판단
+        # 적합도 및 경고 판단
         suitable = (12 <= temp <= 18) and (60 <= humid <= 85)
         water_alert = rain == 0
         wind_alert = wind >= 14
@@ -142,7 +145,7 @@ with tab6:
         else:
             color = 'gray'
 
-        # Tooltip 구성
+        # Tooltip
         tooltip = f"""
         <b>{name}</b> ({latest_data['일시'].date()})<br>
         🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
@@ -151,7 +154,7 @@ with tab6:
         {"⚠️ 강풍 주의" if wind_alert else ""}
         """
 
-        # CircleMarker with Cluster
+        # CircleMarker 추가
         folium.CircleMarker(
             location=[lat, lon],
             radius=10, color=color, fill=True,
@@ -160,3 +163,4 @@ with tab6:
         ).add_to(marker_cluster)
 
     html(fmap._repr_html_(), height=550, width=750)
+
