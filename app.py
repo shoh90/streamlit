@@ -1,221 +1,437 @@
+"""
+Rallit Jobs Dashboard - 메인 Streamlit 애플리케이션
+GitHub Pages/Streamlit Cloud 배포용
+"""
+
 import streamlit as st
 import pandas as pd
-import sqlite3
-import plotly.express as px
-import folium
-from streamlit.components.v1 import html
+import sys
+from pathlib import Path
+from datetime import datetime
+import logging
 
-# 데이터 로딩 함수
-@st.cache_data
-def load_data():
-    conn = sqlite3.connect("asos_weather.db")
-    df = pd.read_sql("SELECT * FROM asos_weather", conn)
-    conn.close()
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
 
-    df['일시'] = pd.to_datetime(df['일시'], errors='coerce')
-    df['평균기온(°C)'] = pd.to_numeric(df['평균기온(°C)'], errors='coerce')
+try:
+    from src.data_loader import data_loader
+    from src.visualizations import visualizer
+    from src.utils import format_currency, calculate_metrics, filter_dataframe
+except ImportError as e:
+    st.error(f"모듈 import 오류: {e}")
+    st.stop()
 
-    # 강수량 컬럼명 자동 탐지
-    rain_col = [col for col in df.columns if '강수량' in col][0]
-    df[rain_col] = pd.to_numeric(df[rain_col], errors='coerce')
-    df = df.rename(columns={rain_col: '일강수량(mm)'})
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    # 습도 컬럼명 자동 탐지
-    humid_col = [col for col in df.columns if '습도' in col][0]
-    df[humid_col] = pd.to_numeric(df[humid_col], errors='coerce')
-    df = df.rename(columns={humid_col: '평균 상대습도(%)'})
-
-    # 풍속 컬럼명 자동 탐지
-    wind_col = [col for col in df.columns if '풍속' in col][0]
-    df[wind_col] = pd.to_numeric(df[wind_col], errors='coerce')
-    df = df.rename(columns={wind_col: '평균 풍속(m/s)'})
-
-    return df.dropna(subset=['일시'])
-
-df = load_data()
-df['연월'] = df['일시'].dt.to_period('M').astype(str)
-
-stations = [
-    {"name": "제주시", "lat": 33.4996, "lon": 126.5312},
-    {"name": "서귀포", "lat": 33.2540, "lon": 126.5618},
-    {"name": "한림", "lat": 33.4125, "lon": 126.2614},
-    {"name": "성산", "lat": 33.3875, "lon": 126.8808},
-    {"name": "고흥", "lat": 34.6076, "lon": 127.2871},
-    {"name": "완도", "lat": 34.3111, "lon": 126.7531}
-]
-
-# 탭 구성
-tabs = ["📊 월별 기후 변화", "🍊 감귤 적합 일자", "🌵 이상기후 경고", "🧭 작물 조건 비교", "📧 기상 알림", "🗺️ 지도 시각화"]
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(tabs)
-
-with tab1:
-    st.subheader("📊 지점별 월별 기후 변화")
-    selected_sites = st.multiselect('지점을 선택하세요', df['지점명'].unique(), default=df['지점명'].unique())
-    df_filtered = df[df['지점명'].isin(selected_sites)]
-    df_filtered['연월'] = df_filtered['일시'].dt.to_period('M').astype(str)
-
-    monthly = df_filtered.groupby(['연월', '지점명'])[['평균기온(°C)', '일강수량(mm)', '평균 상대습도(%)']].mean().reset_index()
-
-    for y_col, title in [('평균기온(°C)', '월별 평균기온'), ('일강수량(mm)', '월별 평균강수량'), ('평균 상대습도(%)', '월별 평균습도')]:
-        fig = px.line(monthly, x='연월', y=y_col, color='지점명', markers=True, title=title)
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.subheader("🍊 감귤 재배 적합 월별 평균 일자")
-
-    # 월 리스트 생성
-    month_options = sorted(df['일시'].dt.to_period('M').unique().astype(str))
-
-    if not month_options:
-        st.error("월별 데이터를 불러오지 못했습니다. 데이터를 확인하세요.")
-        st.stop()
-
-    # 월 선택 위젯 (tab2 전용 key)
-    selected_month_tab2 = st.selectbox(
-        "월을 선택하세요",
-        month_options,
-        index=len(month_options) - 1,
-        key="tab2_month_select"
-    )
-
-    # 선택한 월 기준 필터링
-    df['연월'] = df['일시'].dt.to_period('M').astype(str)
-    df_selected_tab2 = df[df['연월'] == selected_month_tab2]
-
-    # 월별 평균값 계산 (지점별)
-    df_monthly_tab2 = df_selected_tab2.groupby('지점명').agg({
-        '평균기온(°C)': 'mean',
-        '평균 상대습도(%)': 'mean',
-        '일강수량(mm)': 'mean',
-        '평균 풍속(m/s)': 'mean'
-    }).reset_index()
-
-    # 감귤 적합 기준 필터링 (기온+습도)
-    citrus_df_tab2 = df_monthly_tab2[
-        (df_monthly_tab2['평균기온(°C)'].between(12, 18)) &
-        (df_monthly_tab2['평균 상대습도(%)'].between(60, 85))
-    ]
-
-    st.subheader(f"📅 {selected_month_tab2} 감귤 재배 적합 지점")
-    st.dataframe(citrus_df_tab2)
-
-with tab3:
-    st.subheader("🌵 이상기후 경고 (5일 무강수 + 고온 + 강풍)")
-    df['무강수'] = (df['일강수량(mm)'] == 0).astype(int)
-    df['연속무강수'] = df['무강수'] * (df['무강수'].groupby((df['무강수'] != df['무강수'].shift()).cumsum()).cumcount() + 1)
-    df['고온경고'] = df['평균기온(°C)'] >= 30
-    df['강풍경고'] = df['평균 풍속(m/s)'] >= 14
-
-    alerts_df = df[(df['연속무강수'] >= 5) | (df['고온경고']) | (df['강풍경고'])]
-    st.dataframe(alerts_df[['일시', '지점명', '평균기온(°C)', '평균 풍속(m/s)', '연속무강수', '고온경고', '강풍경고']])
-
-with tab4:
-    st.subheader("🧭 작물 재배 적합 조건 비교")
-    crops = {
-        "감귤": {'기온': (12, 18), '습도': (60, 85)},
-        "무": {'기온': (5, 20), '습도': (50, 75)},
-        "고추": {'기온': (20, 27), '습도': (40, 70)}
+# 페이지 설정
+st.set_page_config(
+    page_title="Rallit 채용 정보 대시보드",
+    page_icon="💼",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://github.com/your-username/rallit-jobs-dashboard',
+        'Report a bug': "https://github.com/your-username/rallit-jobs-dashboard/issues",
+        'About': "# Rallit Jobs Dashboard\n채용 정보를 시각화하는 대시보드입니다."
     }
-    crop = st.selectbox("작물을 선택하세요", list(crops.keys()))
-    cmin, cmax = crops[crop]['기온']
-    hmin, hmax = crops[crop]['습도']
+)
 
-    crop_df = df[df['평균기온(°C)'].between(cmin, cmax) & df['평균 상대습도(%)'].between(hmin, hmax)]
-    st.dataframe(crop_df[['일시', '지점명', '평균기온(°C)', '평균 상대습도(%)']])
+# 커스텀 CSS
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        color: #FF6B6B;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 0.5rem 0;
+    }
+    .sidebar .sidebar-content {
+        background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+    }
+    .stSelectbox > div > div {
+        background-color: #f0f2f6;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-with tab5:
-    st.subheader("📧 실시간 기상 알림")
-    latest = df['일시'].max()
-    today = df[df['일시'] == latest].iloc[0]
-
-    alerts = []
-    if today['일강수량(mm)'] == 0:
-        alerts.append("💧 오늘 강수량 0mm → 관수 작업 필요")
-    if today['평균 풍속(m/s)'] >= 14:
-        alerts.append("🌬️ 강풍 주의! 시설물 점검 필요")
-    if not alerts:
-        alerts.append("✅ 현재 이상 경고 없음")
-
-    for alert in alerts:
-        st.warning(alert)
-    st.write(f"🕒 기준 날짜: {latest.strftime('%Y-%m-%d')}")
+def main():
+    """메인 애플리케이션 함수"""
     
-with tab6:
-    st.subheader("🍊 감귤 재배 적합 지도 (월별 평균 기준)")
-
-    # 월 선택 위젯 (tab6 전용 key)
-    selected_month_tab6 = st.selectbox(
-        "월을 선택하세요",
-        month_options,
-        index=len(month_options) - 1,
-        key="tab6_month_select"
+    # 헤더
+    st.markdown('<h1 class="main-header">💼 Rallit 채용 정보 대시보드</h1>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    # 데이터 유효성 검사
+    data_issues = data_loader.validate_data(df)
+    if data_issues:
+        with st.expander("⚠️ 데이터 품질 이슈", expanded=False):
+            for issue in data_issues:
+                st.warning(issue)
+    
+    # 사이드바 필터
+    st.sidebar.header("🔍 필터 옵션")
+    st.sidebar.markdown("---")
+    
+    # 직무 카테고리 필터
+    job_categories = ['전체'] + list(df['job_category'].unique())
+    selected_category = st.sidebar.selectbox(
+        "직무 카테고리",
+        job_categories,
+        help="특정 직무 카테고리를 선택하세요"
+    )
+    
+    # 지역 필터
+    regions = ['전체'] + sorted(list(df['address_region'].dropna().unique()))
+    selected_region = st.sidebar.selectbox(
+        "근무 지역",
+        regions,
+        help="근무하고 싶은 지역을 선택하세요"
+    )
+    
+    # 상태 필터
+    statuses = ['전체'] + list(df['status_code'].dropna().unique())
+    selected_status = st.sidebar.selectbox(
+        "채용 상태",
+        statuses,
+        help="채용 진행 상태를 선택하세요"
+    )
+    
+    # 파트너 여부 필터
+    partner_options = ['전체', '파트너 기업만', '일반 기업만']
+    selected_partner = st.sidebar.selectbox(
+        "파트너 여부",
+        partner_options,
+        help="파트너 기업 여부로 필터링"
+    )
+    
+    # 지원금 필터
+    if 'join_reward' in df.columns:
+        reward_df = df[df['join_reward'] > 0]
+        if not reward_df.empty:
+            min_reward = int(reward_df['join_reward'].min())
+            max_reward = int(reward_df['join_reward'].max())
+            reward_range = st.sidebar.slider(
+                "지원금 범위 (원)",
+                min_value=min_reward,
+                max_value=max_reward,
+                value=(min_reward, max_reward),
+                step=10000,
+                format="%d",
+                help="원하는 지원금 범위를 설정하세요"
+            )
+        else:
+            reward_range = None
+    
+    st.sidebar.markdown("---")
+    
+    # 데이터 새로고침 버튼
+    if st.sidebar.button("🔄 데이터 새로고침"):
+        st.cache_data.clear()
+        st.experimental_rerun()
+    
+    # 데이터 필터링
+    filtered_df = filter_dataframe(
+        df, selected_category, selected_region, selected_status, 
+        selected_partner, reward_range if 'reward_range' in locals() else None
+    )
+    
+    # 메인 메트릭
+    metrics = calculate_metrics(filtered_df)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "총 채용 공고",
+            metrics['total_jobs'],
+            delta=None,
+            help="필터링된 전체 채용 공고 수"
+        )
+    
+    with col2:
+        st.metric(
+            "모집중",
+            metrics['hiring_count'],
+            delta=f"{metrics['hiring_percentage']:.1f}%",
+            help="현재 모집중인 채용 공고 수"
+        )
+    
+    with col3:
+        st.metric(
+            "파트너 기업",
+            metrics['partner_count'],
+            delta=f"{metrics['partner_percentage']:.1f}%",
+            help="파트너 기업의 채용 공고 수"
+        )
+    
+    with col4:
+        st.metric(
+            "참여 기업 수",
+            metrics['unique_companies'],
+            delta=None,
+            help="채용 공고를 올린 고유 기업 수"
+        )
+    
+    st.markdown("---")
+    
+    # 탭으로 섹션 구분
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 기본 분석", "🏢 기업 분석", "💻 기술 분석", "📋 상세 데이터"])
+    
+    with tab1:
+        st.header("📊 기본 채용 정보 분석")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 직무 카테고리 분포
+            if not filtered_df.empty:
+                fig_pie = visualizer.create_category_pie_chart(filtered_df)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.warning("표시할 데이터가 없습니다.")
+        
+        with col2:
+            # 지역별 분포
+            if not filtered_df.empty:
+                fig_region = visualizer.create_region_bar_chart(filtered_df)
+                st.plotly_chart(fig_region, use_container_width=True)
+        
+        # 채용 상태 및 직급 분포
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if not filtered_df.empty:
+                fig_status = visualizer.create_status_donut_chart(filtered_df)
+                st.plotly_chart(fig_status, use_container_width=True)
+        
+        with col2:
+            if not filtered_df.empty:
+                fig_level = visualizer.create_level_distribution(filtered_df)
+                st.plotly_chart(fig_level, use_container_width=True)
+    
+    with tab2:
+        st.header("🏢 기업별 채용 분석")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 상위 채용 기업
+            if not filtered_df.empty:
+                fig_companies = visualizer.create_companies_chart(filtered_df)
+                st.plotly_chart(fig_companies, use_container_width=True)
+        
+        with col2:
+            # 회사 규모별 분포
+            if not filtered_df.empty:
+                fig_size = visualizer.create_company_size_chart(filtered_df)
+                st.plotly_chart(fig_size, use_container_width=True)
+        
+        # 카테고리별 다중 비교
+        if not filtered_df.empty:
+            fig_multi = visualizer.create_multi_category_comparison(filtered_df)
+            st.plotly_chart(fig_multi, use_container_width=True)
+    
+    with tab3:
+        st.header("💻 기술 스택 및 지원금 분석")
+        
+        # 기술 스택 분석 (개발자 직군 포함된 경우에만)
+        if selected_category in ['전체', 'DEVELOPER'] and not filtered_df.empty:
+            dev_df = filtered_df[filtered_df['job_category'] == 'DEVELOPER'] if selected_category == '전체' else filtered_df
+            
+            if not dev_df.empty:
+                fig_skills = visualizer.create_skills_chart(dev_df)
+                if fig_skills:
+                    st.plotly_chart(fig_skills, use_container_width=True)
+                else:
+                    st.info("기술 스택 정보가 없습니다.")
+        
+        # 지원금 분석
+        if 'join_reward' in filtered_df.columns:
+            reward_df = filtered_df[filtered_df['join_reward'] > 0]
+            
+            if not reward_df.empty:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("💰 지원금 통계")
+                    avg_reward = reward_df['join_reward'].mean()
+                    max_reward = reward_df['join_reward'].max()
+                    min_reward = reward_df['join_reward'].min()
+                    median_reward = reward_df['join_reward'].median()
+                    
+                    st.metric("평균 지원금", format_currency(avg_reward))
+                    st.metric("최대 지원금", format_currency(max_reward))
+                    st.metric("최소 지원금", format_currency(min_reward))
+                    st.metric("중간값 지원금", format_currency(median_reward))
+                
+                with col2:
+                    fig_reward_hist = visualizer.create_reward_histogram(filtered_df)
+                    if fig_reward_hist:
+                        st.plotly_chart(fig_reward_hist, use_container_width=True)
+                
+                # 카테고리별 지원금 박스플롯
+                fig_reward_box = visualizer.create_reward_boxplot(filtered_df)
+                if fig_reward_box:
+                    st.plotly_chart(fig_reward_box, use_container_width=True)
+            else:
+                st.info("지원금 정보가 있는 채용 공고가 없습니다.")
+    
+    with tab4:
+        st.header("📋 채용 공고 상세 정보")
+        
+        # 표시할 컬럼 선택
+        available_columns = filtered_df.columns.tolist()
+        default_columns = [
+            'title', 'company_name', 'job_category', 
+            'address_region', 'status_name', 'join_reward'
+        ]
+        
+        # 기본 컬럼이 데이터에 있는지 확인
+        default_columns = [col for col in default_columns if col in available_columns]
+        
+        display_columns = st.multiselect(
+            "표시할 컬럼 선택",
+            options=available_columns,
+            default=default_columns,
+            help="테이블에 표시할 컬럼을 선택하세요"
+        )
+        
+        if display_columns and not filtered_df.empty:
+            # 검색 기능
+            search_term = st.text_input(
+                "🔍 검색어 입력 (제목, 회사명 기준)",
+                help="채용 공고 제목이나 회사명으로 검색하세요"
+            )
+            
+            display_df = filtered_df.copy()
+            
+            if search_term:
+                mask = (
+                    display_df['title'].str.contains(search_term, case=False, na=False) |
+                    display_df['company_name'].str.contains(search_term, case=False, na=False)
+                )
+                display_df = display_df[mask]
+            
+            # 정렬 옵션
+            col1, col2 = st.columns(2)
+            with col1:
+                sort_by = st.selectbox("정렬 기준", display_columns)
+            with col2:
+                sort_order = st.radio("정렬 순서", ["오름차순", "내림차순"], horizontal=True)
+            
+            ascending = True if sort_order == "오름차순" else False
+            display_df_sorted = display_df.sort_values(sort_by, ascending=ascending)
+            
+            # 페이지네이션
+            rows_per_page = st.selectbox("페이지당 행 수", [10, 25, 50, 100])
+            total_rows = len(display_df_sorted)
+            
+            if total_rows > 0:
+                total_pages = (total_rows - 1) // rows_per_page + 1
+                
+                if total_pages > 1:
+                    page = st.number_input(
+                        "페이지", 
+                        min_value=1, 
+                        max_value=total_pages, 
+                        value=1,
+                        help=f"총 {total_pages}페이지 중 선택"
+                    )
+                    start_idx = (page - 1) * rows_per_page
+                    end_idx = start_idx + rows_per_page
+                    paginated_df = display_df_sorted[display_columns].iloc[start_idx:end_idx]
+                    
+                    st.info(f"📄 {start_idx + 1}-{min(end_idx, total_rows)} / {total_rows}개 표시")
+                else:
+                    paginated_df = display_df_sorted[display_columns]
+                
+                # 데이터 테이블 표시
+                st.dataframe(
+                    paginated_df,
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # 데이터 다운로드
+                col1, col2, col3 = st.columns([1, 1, 2])
+                
+                with col1:
+                    csv = display_df_sorted[display_columns].to_csv(index=False, encoding='utf-8-sig')
+                    st.download_button(
+                        label="📥 CSV 다운로드",
+                        data=csv,
+                        file_name=f"rallit_jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        help="필터링된 데이터를 CSV 파일로 다운로드"
+                    )
+                
+                with col2:
+                    json_data = display_df_sorted[display_columns].to_json(
+                        orient='records', 
+                        force_ascii=False, 
+                        indent=2
+                    )
+                    st.download_button(
+                        label="📄 JSON 다운로드",
+                        data=json_data,
+                        file_name=f"rallit_jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        help="필터링된 데이터를 JSON 파일로 다운로드"
+                    )
+            else:
+                st.warning("검색 조건에 맞는 데이터가 없습니다.")
+        
+        elif not display_columns:
+            st.warning("표시할 컬럼을 선택해주세요.")
+        
+        else:
+            st.warning("표시할 데이터가 없습니다.")
+    
+    # 푸터
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center; color: #666; padding: 1rem;'>
+            <p>💼 Rallit Jobs Dashboard | 
+            📊 데이터 기반 채용 정보 분석 | 
+            🔗 <a href='https://github.com/your-username/rallit-jobs-dashboard' target='_blank'>GitHub</a>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    df_selected_tab6 = df[df['연월'] == selected_month_tab6]
-
-    # 월별 평균값 계산 (지점별)
-    df_monthly_tab6 = df_selected_tab6.groupby('지점명').agg({
-        '평균기온(°C)': 'mean',
-        '평균 상대습도(%)': 'mean',
-        '일강수량(mm)': 'mean',
-        '평균 풍속(m/s)': 'mean'
-    }).reset_index()
-
-    # 지도 초기화
-    fmap = folium.Map(location=[34.0, 126.5], zoom_start=8)
-    from folium.plugins import MarkerCluster
-    marker_cluster = MarkerCluster().add_to(fmap)
-
-    # 지도 마커 생성
-    for station in stations:
-        name, lat, lon = station['name'], station['lat'], station['lon']
-
-        station_data = df_monthly_tab6[df_monthly_tab6['지점명'] == name]
-        if station_data.empty:
-            continue
-
-        data = station_data.iloc[0]
-        temp = data['평균기온(°C)']
-        humid = data['평균 상대습도(%)']
-        rain = data['일강수량(mm)']
-        wind = data['평균 풍속(m/s)']
-
-        suitable = (12 <= temp <= 18) and (60 <= humid <= 85)
-        water_alert = rain == 0
-        wind_alert = wind >= 14
-
-        reasons = []
-        if not (12 <= temp <= 18):
-            reasons.append(f"기온 {temp:.1f}℃ (12~18℃ 범위 벗어남)")
-        if not (60 <= humid <= 85):
-            reasons.append(f"습도 {humid:.1f}% (60~85% 범위 벗어남)")
-
-        if wind_alert:
-            color = 'red'
-        elif water_alert:
-            color = 'orange'
-        elif suitable:
-            color = 'green'
-        else:
-            color = 'gray'
-
-        tooltip = f"""
-        <b>{name}</b> ({selected_month_tab6} 평균)<br>
-        🌡 {temp:.1f}℃ | 💧 {humid:.1f}% | ☔ {rain:.1f}mm | 🌬️ {wind:.1f}m/s<br>
-        {"✅ 감귤 재배 적합" if suitable else "❌ 부적합"}<br>
-        {"<br>".join(reasons) if not suitable else ""}
-        {"⚠️ 관수 필요" if water_alert else ""}{" | " if water_alert and wind_alert else ""}
-        {"⚠️ 강풍 주의" if wind_alert else ""}
-        """
-
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=10,
-            color=color,
-            fill=True,
-            fill_opacity=0.8,
-            popup=folium.Popup(tooltip, max_width=300)
-        ).add_to(marker_cluster)
-
-    html(fmap._repr_html_(), height=550, width=750)
-
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"애플리케이션 실행 중 오류가 발생했습니다: {str(e)}")
+        logger.error(f"Application error: {str(e)}", exc_info=True)로딩 상태 표시
+    with st.spinner('데이터를 로딩중입니다...'):
+        df = data_loader.load_from_database()
+    
+    if df.empty:
+        st.error("😕 데이터를 로드할 수 없습니다.")
+        st.info("📋 CSV 파일들이 data/ 디렉토리에 있는지 확인해주세요:")
+        st.code("""
+        data/
+        ├── rallit_management_jobs.csv
+        ├── rallit_marketing_jobs.csv
+        ├── rallit_design_jobs.csv
+        └── rallit_developer_jobs.csv
+        """)
+        st.stop()
+    
+    # 데이터
