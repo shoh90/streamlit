@@ -570,16 +570,30 @@ def main():
     if 'join_reward' in df.columns:
         reward_df = df[df['join_reward'] > 0]
         if not reward_df.empty:
-            min_reward = int(reward_df['join_reward'].min())
-            max_reward = int(reward_df['join_reward'].max())
+            # 실제 데이터의 min/max 값
+            raw_min_reward = int(reward_df['join_reward'].min())
+            raw_max_reward = int(reward_df['join_reward'].max())
+            
             # 지원금 범위에 따라 step 동적 조정
-            reward_range_size = max_reward - min_reward
+            reward_range_size = raw_max_reward - raw_min_reward
             if reward_range_size <= 100000:  # 10만원 이하
                 step_size = 1000  # 1천원 단위
             elif reward_range_size <= 1000000:  # 100만원 이하
                 step_size = 5000  # 5천원 단위
             else:
                 step_size = 10000  # 1만원 단위
+            
+            # 슬라이더 범위는 항상 0부터 시작하여 깔끔한 단위로 설정
+            slider_min = 0
+            slider_max = ((raw_max_reward + step_size - 1) // step_size) * step_size
+            
+            # 기본값을 강제로 깔끔한 단위로 설정 (실제 데이터와 무관하게)
+            if raw_min_reward <= step_size:
+                clean_default_min = 0  # 실제 최소값이 step보다 작으면 0으로
+            else:
+                clean_default_min = (raw_min_reward // step_size) * step_size
+            
+            clean_default_max = ((raw_max_reward + step_size - 1) // step_size) * step_size
             
             # 슬라이더와 숫자 입력 선택 옵션
             filter_type = st.sidebar.radio(
@@ -592,34 +606,41 @@ def main():
             if filter_type == "슬라이더":
                 reward_range = st.sidebar.slider(
                     "지원금 범위 (원)",
-                    min_value=min_reward,
-                    max_value=max_reward,
-                    value=(min_reward, max_reward),
+                    min_value=slider_min,
+                    max_value=slider_max,
+                    value=(clean_default_min, clean_default_max),
                     step=step_size,
                     format="%d",
                     help=f"원하는 지원금 범위를 설정하세요 ({step_size:,}원 단위)"
                 )
+                
+                # 실제 데이터 범위 정보 표시
+                st.sidebar.caption(f"💡 실제 데이터 범위: {raw_min_reward:,}원 ~ {raw_max_reward:,}원")
+                
             else:
                 col1, col2 = st.sidebar.columns(2)
                 with col1:
                     min_input = st.number_input(
                         "최소 지원금",
-                        min_value=min_reward,
-                        max_value=max_reward,
-                        value=min_reward,
-                        step=1000,
+                        min_value=0,
+                        max_value=slider_max,
+                        value=clean_default_min,  # 강제로 깔끔한 값
+                        step=step_size,
                         format="%d"
                     )
                 with col2:
                     max_input = st.number_input(
                         "최대 지원금",
-                        min_value=min_reward,
-                        max_value=max_reward,
-                        value=max_reward,
-                        step=1000,
+                        min_value=0,
+                        max_value=slider_max * 2,
+                        value=clean_default_max,  # 강제로 깔끔한 값
+                        step=step_size,
                         format="%d"
                     )
                 reward_range = (min_input, max_input)
+                
+                # 실제 데이터 범위 정보 표시
+                st.sidebar.caption(f"💡 실제 데이터 범위: {raw_min_reward:,}원 ~ {raw_max_reward:,}원")
     
     st.sidebar.markdown("---")
     
