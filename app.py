@@ -572,15 +572,54 @@ def main():
         if not reward_df.empty:
             min_reward = int(reward_df['join_reward'].min())
             max_reward = int(reward_df['join_reward'].max())
-            reward_range = st.sidebar.slider(
-                "지원금 범위 (원)",
-                min_value=min_reward,
-                max_value=max_reward,
-                value=(min_reward, max_reward),
-                step=10000,
-                format="%d",
-                help="원하는 지원금 범위를 설정하세요"
+            # 지원금 범위에 따라 step 동적 조정
+            reward_range_size = max_reward - min_reward
+            if reward_range_size <= 100000:  # 10만원 이하
+                step_size = 1000  # 1천원 단위
+            elif reward_range_size <= 1000000:  # 100만원 이하
+                step_size = 5000  # 5천원 단위
+            else:
+                step_size = 10000  # 1만원 단위
+            
+            # 슬라이더와 숫자 입력 선택 옵션
+            filter_type = st.sidebar.radio(
+                "지원금 필터 방식",
+                ["슬라이더", "직접 입력"],
+                horizontal=True,
+                help="필터링 방식을 선택하세요"
             )
+            
+            if filter_type == "슬라이더":
+                reward_range = st.sidebar.slider(
+                    "지원금 범위 (원)",
+                    min_value=min_reward,
+                    max_value=max_reward,
+                    value=(min_reward, max_reward),
+                    step=step_size,
+                    format="%d",
+                    help=f"원하는 지원금 범위를 설정하세요 ({step_size:,}원 단위)"
+                )
+            else:
+                col1, col2 = st.sidebar.columns(2)
+                with col1:
+                    min_input = st.number_input(
+                        "최소 지원금",
+                        min_value=min_reward,
+                        max_value=max_reward,
+                        value=min_reward,
+                        step=1000,
+                        format="%d"
+                    )
+                with col2:
+                    max_input = st.number_input(
+                        "최대 지원금",
+                        min_value=min_reward,
+                        max_value=max_reward,
+                        value=max_reward,
+                        step=1000,
+                        format="%d"
+                    )
+                reward_range = (min_input, max_input)
     
     st.sidebar.markdown("---")
     
