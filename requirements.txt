@@ -1,4 +1,27 @@
-streamlit==1.35.0
-pandas==2.2.2
-plotly==5.22.0
-folium==0.16.0
+# Streamlit 및 웹 애플리케이션
+streamlit>=1.28.0
+streamlit-option-menu>=0.3.6
+
+# 데이터 처리
+pandas>=1.5.0
+numpy>=1.21.0
+
+# 시각화
+plotly>=5.0.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# 데이터베이스
+# sqlite3는 Python 내장 모듈이므로 별도 설치 불필요
+
+# 유틸리티
+openpyxl>=3.0.0  # Excel 파일 처리
+python-dateutil>=2.8.0
+
+# 개발 및 테스트 (선택사항)
+pytest>=7.0.0
+flake8>=5.0.0
+
+# 기타
+requests>=2.28.0
+Pillow>=9.0.0  # 이미지 처리 (필요시)
