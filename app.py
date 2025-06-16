@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 필터 요약 로직 수정)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 스킬 필터링 로직 추가)
 
 import streamlit as st
 import pandas as pd
@@ -216,28 +216,35 @@ def main():
         selected_levels = st.multiselect("📈 직무 레벨", df['job_level'].dropna().unique(), default=list(df['job_level'].dropna().unique())); keyword_input = st.text_input("🔍 키워드 검색 (공고명/회사명)", "")
         if st.button("🔄 데이터 새로고침"): st.cache_data.clear(); st.rerun()
 
+    # <<< 오류 수정: 필터링 로직에 '보유 스킬' 조건 추가
     filtered_df = df.copy()
+    
+    # 1. 고급 필터 적용
     if user_category != '전체': filtered_df = filtered_df[filtered_df['job_category'] == user_category]
     if selected_region != '전체': filtered_df = filtered_df[filtered_df['address_region'] == selected_region]
     if reward_filter: filtered_df = filtered_df[filtered_df['join_reward'] > 0]
     if partner_filter: filtered_df = filtered_df[filtered_df['is_partner'] == 1]
     if selected_levels: filtered_df = filtered_df[filtered_df['job_level'].isin(selected_levels)]
     filtered_df = filtered_df[filtered_df['join_reward'].between(join_reward_range[0], join_reward_range[1])]
+    
+    # 2. 키워드 필터 적용
     if keyword_input:
         keyword = keyword_input.lower()
         mask = (filtered_df['title'].str.lower().str.contains(keyword, na=False)) | (filtered_df['company_name'].str.lower().str.contains(keyword, na=False))
         filtered_df = filtered_df[mask]
 
-    # <<< 오류 수정: 필터 요약 배너 로직 변경
+    # 3. 보유 스킬 필터 적용
+    if user_profile['skills'] and 'job_skill_keywords' in filtered_df.columns:
+        # 사용자의 스킬 중 하나라도 공고의 스킬 키워드에 포함되는 경우를 찾음
+        user_skills_pattern = '|'.join([re.escape(skill.strip()) for skill in user_profile['skills']])
+        filtered_df = filtered_df[filtered_df['job_skill_keywords'].str.contains(user_skills_pattern, case=False, na=False)]
+
+    # 필터 요약 배너 생성
     summary_list = []
-    if user_profile['skills']:
-        summary_list.append(f"**보유 스킬:** `{', '.join(user_profile['skills'])}`")
-    if user_category != '전체':
-        summary_list.append(f"**직무:** `{user_category}`")
-    if selected_region != '전체':
-        summary_list.append(f"**지역:** `{selected_region}`")
-    if keyword_input:
-        summary_list.append(f"**키워드:** `{keyword_input}`")
+    if user_profile['skills']: summary_list.append(f"**보유 스킬:** `{', '.join(user_profile['skills'])}`")
+    if user_category != '전체': summary_list.append(f"**직무:** `{user_category}`")
+    if selected_region != '전체': summary_list.append(f"**지역:** `{selected_region}`")
+    if keyword_input: summary_list.append(f"**키워드:** `{keyword_input}`")
 
     active_filters = " | ".join(summary_list)
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
