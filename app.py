@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 실시간 API 연동)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, GET API 및 XML 파싱)
 
 import streamlit as st
 import pandas as pd
@@ -11,6 +11,7 @@ import logging
 import random
 import re
 import requests # API 호출을 위한 라이브러리
+import xml.etree.ElementTree as ET # XML 파싱을 위한 라이브러리
 
 # ==============================================================================
 # 1. 페이지 및 환경 설정
@@ -179,49 +180,61 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-# --- 신규 함수: API 연동 및 시각화 ---
+# --- 신규 함수: GET API 연동 및 XML 파싱 ---
 @st.cache_data(ttl=3600) # 1시간 동안 캐시 유지
 def fetch_labor_trend_data():
-    url = "https://eis.work24.go.kr/eisps/opiv/selectOpivList.do"
-    headers = {"Content-Type": "application/json"}
-    payload = {"pageIndex": 1, "pageUnit": 100} # 100개 데이터 요청
+    url = "https://eis.work24.go.kr/opi/joApi.do"
+    # 실제 인증키를 사용해야 합니다. 여기서는 예시로 'YOUR_AUTH_KEY'를 사용합니다.
+    # https://www.data.go.kr/ 등에서 발급받으세요.
+    auth_key = st.secrets.get("EIS_AUTH_KEY", "YOUR_AUTH_KEY") 
+    
+    params = {
+        'authKey': auth_key,
+        'apiSecd': 'OPIA',
+        'rernSecd': 'XML', # 응답 형식을 XML로 요청
+        'display': 100 # 최대 100개 데이터 요청
+    }
+    
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=5)
+        response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
-            return response.json().get('resultList', [])
+            # XML 파싱
+            root = ET.fromstring(response.content)
+            data_list = []
+            for item in root.findall('.//item'):
+                data = {child.tag: child.text for child in item}
+                data_list.append(data)
+            return data_list
         else:
             logger.error(f"API Error: Status code {response.status_code}")
             return []
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API Request failed: {e}")
+    except (requests.exceptions.RequestException, ET.ParseError) as e:
+        logger.error(f"API Request or XML Parsing failed: {e}")
         return []
 
 def render_labor_trend_analysis():
     st.header("💡 실시간 노동시장 트렌드 (고용노동부 API)")
     
-    trend_data = fetch_labor_trend_data()
+    with st.spinner("실시간 고용 데이터를 불러오는 중..."):
+        trend_data = fetch_labor_trend_data()
+    
     if trend_data:
         trends_df = pd.DataFrame(trend_data)
         
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("📈 최신 인기 직종")
-            top_jobs = trends_df['occptNm'].value_counts().head(10)
-            fig_jobs = px.bar(top_jobs, y=top_jobs.index, x=top_jobs.values, orientation='h', title="최근 등록된 인기 직종 TOP 10", labels={'y': '직종', 'x':'공고 수'})
-            fig_jobs.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig_jobs, use_container_width=True)
+        # API 데이터 필드명에 맞게 키 변경 ('occptNm' -> 'job_title' 등)
+        # 예시 필드명: company, title, sal, region, holiday_tp_nm, career, min_edubg, major
+        
+        st.subheader("📈 최신 인기 직종")
+        # 'title' 필드에서 키워드 추출 (간단한 방식)
+        job_titles = trends_df['title'].dropna().str.extract(r'([가-힣\s]+)').iloc[:, 0].str.strip()
+        top_jobs = job_titles.value_counts().head(10)
+        fig_jobs = px.bar(top_jobs, y=top_jobs.index, x=top_jobs.values, orientation='h', title="최근 등록된 인기 직종 TOP 10", labels={'y': '직종', 'x':'공고 수'})
+        fig_jobs.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig_jobs, use_container_width=True)
 
-        with c2:
-            st.subheader("📍 지역별 채용 수요")
-            top_regions = trends_df['ctpvNm'].value_counts().head(10)
-            fig_regions = px.bar(top_regions, y=top_regions.index, x=top_regions.values, orientation='h', title="최근 채용공고 상위 지역 TOP 10", labels={'y': '지역', 'x':'공고 수'})
-            fig_regions.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig_regions, use_container_width=True)
-
-        st.subheader("👴 고령자 친화 채용 비율")
-        # '연령무관' 또는 '60'이 포함된 경우를 고령자 친화로 간주
-        senior_friendly = trends_df[trends_df['ageClNm'].str.contains('무관|60', na=False)]
-        ratio = len(senior_friendly) / len(trends_df) if len(trends_df) > 0 else 0
-        st.metric(label="60세 이상 지원 가능 공고 비율", value=f"{ratio*100:.1f}%")
-        st.progress(ratio)
+        st.subheader("📍 지역별 채용 수요")
+        top_regions = trends_df['region'].value_counts().head(10)
+        fig_regions = px.bar(top_regions, y=top_regions.index, x=top_regions.values, orientation='h', title="최근 채용공고 상위 지역 TOP 10", labels={'y': '지역', 'x':'공고 수'})
+        fig_regions.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig_regions, use_container_width=True)
     else:
         st.warning("⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
 
