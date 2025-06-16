@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, GET API 및 XML 파싱)
+# app.py - Rallit 스마트 채용 대시보드 (최종 통합 완성본, 신규 트렌드 분석 포함)
 
 import streamlit as st
 import pandas as pd
@@ -181,50 +181,52 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-# --- 신규 함수: GET API 연동 및 XML 파싱 ---
+# --- 신규 함수: 노동시장 트렌드 분석 ---
 @st.cache_data(ttl=3600)
 def fetch_labor_trend_data():
-    url = "https://eis.work24.go.kr/opi/joApi.do"
-    auth_key = st.secrets.get("EIS_AUTH_KEY", "YOUR_AUTH_KEY_HERE")
-    
-    params = {'authKey': auth_key, 'apiSecd': 'OPIA', 'rernSecd': 'XML', 'display': 100}
-    
+    url = "https://eis.work24.go.kr/eisps/opiv/selectOpivList.do"
+    headers = {"Content-Type": "application/json"}
+    payload = {"pageIndex": 1, "pageUnit": 50, "pageSize": 50}
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.post(url, json=payload, headers=headers, timeout=5)
         if response.status_code == 200:
-            root = ET.fromstring(response.text)
-            data_list = [{'company': item.findtext('company'), 'title': item.findtext('title'), 'region': item.findtext('region'), 'sal': item.findtext('sal'), 'minEdubg': item.findtext('minEdubg'), 'career': item.findtext('career')} for item in root.findall('.//item')]
-            return data_list
-        else:
-            logger.error(f"API Error: Status code {response.status_code}")
-            st.error(f"API 요청 실패: 상태 코드 {response.status_code}")
-            return []
-    except (requests.exceptions.RequestException, ET.ParseError) as e:
-        logger.error(f"API Request or XML Parsing failed: {e}")
+            return response.json().get('resultList', [])
+        return []
+    except requests.exceptions.RequestException:
         return []
 
 def render_labor_trend_analysis():
-    st.header("💡 실시간 노동시장 트렌드 (고용노동부 API)")
-    
+    st.header("💡 노동시장 통계 기반 트렌드 분석")
+
+    st.subheader("📌 상용직 증가 추이 시각화 (샘플)")
+    years = [2020, 2021, 2022, 2023, 2024, 2025]
+    increase = [20.1, 22.3, 25.7, 28.6, 33.0, 37.5]
+    fig = px.line(x=years, y=increase, markers=True, title="2020-2025 상용직 근로자 수 증가 추이", labels={'x': '연도', 'y': '상용직 근로자 수 (만 명)'})
+    fig.update_traces(line=dict(color="#1f77b4", width=4)); st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📈 주요 직무별 채용 수요 증감 추이 (샘플)")
+    job_trend_df = pd.DataFrame({'연도': [2023, 2024, 2025]*3, '직무': ['데이터 분석가']*3 + ['AI 개발자']*3 + ['요양보호사']*3, '수요 (추정)': [120, 150, 180, 100, 160, 210, 200, 190, 170]})
+    fig_job_trend = px.line(job_trend_df, x='연도', y='수요 (추정)', color='직무', markers=True, title="직무별 채용 수요 변화 추이")
+    st.plotly_chart(fig_job_trend, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🗺️ 지도 기반 실시간 채용 수요 (고용노동부 API)")
     with st.spinner("실시간 고용 데이터를 불러오는 중..."):
         trend_data = fetch_labor_trend_data()
     
     if trend_data:
         trends_df = pd.DataFrame(trend_data)
         
-        st.subheader("🗺️ 지도 기반 실시간 채용 수요")
         location_dict = {"서울": [37.5665, 126.9780], "부산": [35.1796, 129.0756], "대구": [35.8714, 128.6014], "인천": [37.4563, 126.7052], "광주": [35.1595, 126.8526], "대전": [36.3504, 127.3845], "울산": [35.5384, 129.3114], "세종": [36.4801, 127.2891], "경기": [37.4138, 127.5183], "강원": [37.8228, 128.1555], "충북": [36.6358, 127.4917], "충남": [36.5184, 126.8000], "전북": [35.7167, 127.1442], "전남": [34.8161, 126.4630], "경북": [36.4919, 128.8889], "경남": [35.4606, 128.2132], "제주": [33.4996, 126.5312]}
-        
-        trends_df['region_simple'] = trends_df['region'].str.split().str[0].str.replace("특별시", "").str.replace("광역시", "").str.replace("특별자치시", "").str.replace("특별자치도", "")
-        region_counts = trends_df['region_simple'].value_counts()
-        
+        region_counts = trends_df['ctpvNm'].value_counts()
         m = folium.Map(location=[36.5, 127.8], zoom_start=7, tiles="cartodbpositron")
         for region, count in region_counts.items():
-            if region in location_dict:
-                folium.CircleMarker(location=location_dict[region], radius=max(5, count), popup=f"{region}: {count}건", color='#3186cc', fill=True, fill_color='#3186cc', fill_opacity=0.6).add_to(m)
-        st_folium(m, width=1000, height=400)
+            simple_region = region.replace("특별시", "").replace("광역시", "").replace("특별자치시", "").replace("특별자치도", "")
+            if simple_region in location_dict:
+                folium.CircleMarker(location=location_dict[simple_region], radius=max(5, count / 5), popup=f"{region}: {count}건", color='#3186cc', fill=True, fill_color='#3186cc', fill_opacity=0.6).add_to(m)
+        st_folium(m, width=1000, height=400, key="folium_map")
     else:
-        st.warning("⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다. API 인증키가 올바른지 확인해주세요.")
+        st.warning("⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다.")
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
