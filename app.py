@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본)
+# app.py - Rallit 스마트 채용 대시보드 (오류 수정 및 안정성 강화 버전)
 
 import streamlit as st
 import pandas as pd
@@ -93,17 +93,34 @@ class SmartMatchingEngine:
 # ==============================================================================
 def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
     st.header("🎯 스마트 매칭 결과")
-    if not user_profile['skills']: st.info("👆 사이드바에 보유 기술을 입력하면 맞춤 공고를 추천해 드립니다."); return
+    if not user_profile['skills']:
+        st.info("👆 사이드바에 보유 기술을 입력하면 맞춤 공고를 추천해 드립니다.")
+        return
 
-    match_results = [{'idx': idx, 'title': row['title'], 'company': row['company_name'], 'score': s, 'matched': m, 'missing': ms} for idx, row in filtered_df.iterrows() if (s:=(matching_engine.calculate_skill_match(user_profile['skills'], row.get('job_skill_keywords')))[0]) > 20 for m,ms in [(s[1], s[2])]]
-    
+    # <<< 오류 수정: 복잡한 List Comprehension을 명확한 for 반복문으로 변경
+    match_results = []
+    for idx, row in filtered_df.iterrows():
+        # calculate_skill_match 함수는 항상 (점수, 매칭리스트, 미매칭리스트) 튜플을 반환
+        score, matched, missing = matching_engine.calculate_skill_match(
+            user_profile['skills'], row.get('job_skill_keywords')
+        )
+        
+        if score > 20: # 최소 매칭 점수
+            match_results.append({
+                'idx': idx, 
+                'title': row['title'], 
+                'company': row['company_name'], 
+                'score': score, 
+                'matched': matched, 
+                'missing': missing
+            })
+
     st.subheader(f"🌟 '{', '.join(user_profile['skills'])}' 스킬과 맞는 추천 공고")
     
     if not match_results:
         st.warning("아쉽지만, 현재 필터 조건에 맞는 추천 공고가 없습니다. 필터를 조정해보세요.")
         with st.expander("🤔 혹시 이런 건 어떠세요? (대안 제안 기능)"):
             st.markdown("**다른 직무 찾아보기**")
-            # 현재 선택된 직무와 다른 직무들을 추천
             current_category = filtered_df['job_category'].iloc[0] if not filtered_df.empty else None
             other_categories = [cat for cat in all_df['job_category'].unique() if cat != current_category]
             if other_categories: st.write(f"현재 직무 외에도 이런 직무들이 있습니다: `{'`, `'.join(other_categories[:3])}`")
@@ -230,7 +247,6 @@ def main():
     ]
     if keyword_input: filtered_df = filtered_df[filtered_df.apply(lambda row: keyword_input.lower() in str(row.get('title', '')).lower() or keyword_input.lower() in str(row.get('company_name', '')).lower(), axis=1)]
 
-    # (1) 필터 요약 배너
     summary_list = [f"**직무:** `{user_category}`" if user_category != '전체' else '', f"**지역:** `{selected_region}`" if selected_region != '전체' else '', f"**키워드:** `{keyword_input}`" if keyword_input else '']
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
