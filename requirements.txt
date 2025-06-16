@@ -26,3 +26,4 @@ flake8>=5.0.0
 # 기타
 requests>=2.28.0
 Pillow>=9.0.0  # 이미지 처리 (필요시)
+folium
