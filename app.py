@@ -179,7 +179,6 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-# --- 크롤링 기반 뷰 함수 ---
 @st.cache_data(ttl=3600)
 def fetch_employment_report_list():
     """고용행정통계 웹사이트를 크롤링하여 최신 보도자료 목록과 파일 링크를 가져옵니다."""
@@ -191,23 +190,17 @@ def fetch_employment_report_list():
         res.raise_for_status()
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 더 안정적인 선택자로 변경
         rows = soup.select("table.bbs-list tbody tr")
-        if not rows:
-            return pd.DataFrame(), "게시물 목록(rows)을 찾을 수 없습니다."
+        if not rows: return pd.DataFrame(), "게시물 목록(rows)을 찾을 수 없습니다."
 
         for row in rows[:5]: # 상위 5개만 가져오기
-            # 제목과 링크가 있는 두 번째 td를 직접 선택
             title_cell = row.select_one("td.title")
-            if not title_cell or not title_cell.find("a"):
-                continue
+            if not title_cell or not title_cell.find("a"): continue
             
             link = title_cell.find("a")
             title = link.text.strip()
-            
             onclick = link.get("onclick")
-            if not onclick:
-                continue
+            if not onclick: continue
                 
             seq_match = re.search(r"fncOpivDetail\('(\d+)'\)", onclick)
             if seq_match:
@@ -215,16 +208,12 @@ def fetch_employment_report_list():
                 detail_url = f"https://eis.work24.go.kr/eisps/opiv/selectOpivDetail.do?seq={seq}"
                 report_data.append({"제목": title, "링크": detail_url})
         
-        if not report_data:
-            return pd.DataFrame(), "파싱 가능한 리포트를 찾지 못했습니다."
-            
+        if not report_data: return pd.DataFrame(), "파싱 가능한 리포트를 찾지 못했습니다."
         return pd.DataFrame(report_data), "SUCCESS"
-    except Exception as e:
-        logger.error(f"크롤링 중 오류 발생: {e}")
-        return pd.DataFrame(), f"크롤링 오류: {e}"
+    except Exception as e: return pd.DataFrame(), f"크롤링 오류: {e}"
 
-def render_employment_report_list_tab():
-    st.header("📚 고용행정통계 리포트 (크롤링)")
+def render_labor_trend_analysis():
+    st.header("💡 최신 노동시장 동향 리포트")
     df, status = fetch_employment_report_list()
     if status == "SUCCESS" and not df.empty:
         st.dataframe(df, use_container_width=True, hide_index=True,
@@ -295,7 +284,7 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📚 통계 리포트", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
+    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 동향", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
     with tabs[2]: render_employment_report_list_tab()
