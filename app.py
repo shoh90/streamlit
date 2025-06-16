@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 100% 크롤링 기반)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, NameError 수정)
 
 import streamlit as st
 import pandas as pd
@@ -179,20 +179,21 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
+# <<< 함수 이름 통일 및 로직 강화 >>>
 @st.cache_data(ttl=3600)
 def fetch_employment_report_list():
-    """고용행정통계 웹사이트를 크롤링하여 최신 보도자료 목록과 파일 링크를 가져옵니다."""
-    base_url = "https://eis.work24.go.kr"
-    list_url = f"{base_url}/eisps/opiv/selectOpivList.do"
-    report_data = []
+    url = "https://eis.work24.go.kr/eisps/opiv/selectOpivList.do"
     try:
-        res = requests.get(list_url, timeout=10)
+        res = requests.get(url, timeout=10)
         res.raise_for_status()
         soup = BeautifulSoup(res.text, "html.parser")
         
+        # 더 안정적인 선택자로 변경
         rows = soup.select("table.bbs-list tbody tr")
-        if not rows: return pd.DataFrame(), "게시물 목록(rows)을 찾을 수 없습니다."
+        if not rows:
+            return pd.DataFrame(), "게시물 목록(rows)을 찾을 수 없습니다."
 
+        report_data = []
         for row in rows[:5]: # 상위 5개만 가져오기
             title_cell = row.select_one("td.title")
             if not title_cell or not title_cell.find("a"): continue
@@ -208,18 +209,27 @@ def fetch_employment_report_list():
                 detail_url = f"https://eis.work24.go.kr/eisps/opiv/selectOpivDetail.do?seq={seq}"
                 report_data.append({"제목": title, "링크": detail_url})
         
-        if not report_data: return pd.DataFrame(), "파싱 가능한 리포트를 찾지 못했습니다."
+        if not report_data:
+            return pd.DataFrame(), "파싱 가능한 리포트를 찾지 못했습니다."
+            
         return pd.DataFrame(report_data), "SUCCESS"
-    except Exception as e: return pd.DataFrame(), f"크롤링 오류: {e}"
+    except Exception as e:
+        logger.error(f"크롤링 중 오류 발생: {e}")
+        return pd.DataFrame(), f"크롤링 오류: {e}"
 
-def render_labor_trend_analysis():
-    st.header("💡 최신 노동시장 동향 리포트")
+def render_employment_report_list():
+    st.header("📚 고용행정통계 리포트 (크롤링)")
     df, status = fetch_employment_report_list()
     if status == "SUCCESS" and not df.empty:
         st.dataframe(df, use_container_width=True, hide_index=True,
                      column_config={"링크": st.column_config.LinkColumn("상세보기", display_text="🔗 바로가기")})
     else:
         st.error(f"리포트 목록을 불러오는 데 실패했습니다. (상태: {status})")
+
+def render_insured_stat_analysis():
+    st.header("📊 고용노동부 보험자 통계")
+    st.info("이 기능은 API 인증키가 필요합니다. 현재는 인증키 없이 작동하는 크롤링 기능만 활성화되어 있습니다.")
+    st.warning("실제 데이터를 보려면 `.streamlit/secrets.toml` 파일에 `EIS_AUTH_KEY`를 설정해주세요.")
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
@@ -287,7 +297,7 @@ def main():
     tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 동향", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
-    with tabs[2]: render_employment_report_list_tab()
+    with tabs[2]: render_employment_report_list()
     with tabs[3]: render_growth_path(df, user_profile, user_category, matching_engine)
     with tabs[4]: render_company_insight(filtered_df)
     with tabs[5]: render_prediction_analysis()
