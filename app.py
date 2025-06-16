@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 통합 완성본)
+# app.py - Rallit 스마트 채용 대시보드 (최종 통합 완성본, 노동시장 트렌드 탭 추가)
 
 import streamlit as st
 import pandas as pd
@@ -88,7 +88,6 @@ class SmartMatchingEngine:
         if any(skill in modern_skills for skill in user_skills_lower): score += 20; factors.append("최신 기술 트렌드 관심")
         return min(score, 100), factors
     def predict_success_probability(self, skill_score, growth_score):
-        # 최종 합격 확률 = (스킬 점수 * 70%) + (성장 잠재력 * 30%)
         return round((skill_score * 0.7 + growth_score * 0.3), 1)
 
 
@@ -179,6 +178,20 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
+def render_labor_trend_analysis():
+    st.header("📊 노동시장 통계 기반 트렌드 분석")
+    st.subheader("📌 상용직 증가 추이 시각화")
+    years = [2020, 2021, 2022, 2023, 2024, 2025]
+    increase = [20.1, 22.3, 25.7, 28.6, 33.0, 37.5]
+    fig = px.line(x=years, y=increase, markers=True, title="2020-2025 상용직 근로자 수 증가 추이 (샘플)", labels={'x': '연도', 'y': '상용직 근로자 수 (만 명)'})
+    fig.update_traces(line=dict(color="#1f77b4", width=4)); st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📊 산업별 채용 트렌드 (샘플 데이터)")
+    industry_df = pd.DataFrame({'산업': ['IT/소프트웨어', '플랫폼서비스', '헬스케어', '제조업', '유통/물류'], '2024 채용공고 수': [820, 640, 310, 480, 390]})
+    fig2 = px.bar(industry_df, x='2024 채용공고 수', y='산업', orientation='h', title="2024 산업별 채용공고 수 추정"); fig2.update_layout(yaxis={'categoryorder': 'total ascending'}); st.plotly_chart(fig2, use_container_width=True)
+    
+    st.subheader("👴 고령자 맞춤 채용 공고 비율"); st.markdown("60세 이상 지원 가능 공고 비율 (샘플): 약 13.2%"); st.progress(0.132)
+
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
     st.image("https://images.unsplash.com/photo-1531297484001-80022131f5a1?q=80&w=2020&auto=format&fit=crop", caption="AI가 당신의 커리어 미래를 예측합니다.")
@@ -207,11 +220,6 @@ def main():
     with st.expander("✨ 대시보드 기획 의도 자세히 보기"):
         st.markdown("## 🎯 해결하고자 하는 문제들")
         c1,c2,c3 = st.columns(3); c1.markdown('<div class="problem-card"><h3>👤 구직자 문제</h3><ul><li>적합한 공고 찾기 어려움</li><li>JD-스펙 미스매칭</li><li>성장과정 평가 부족</li></ul></div>', unsafe_allow_html=True); c2.markdown('<div class="problem-card"><h3>🏢 기업 문제</h3><ul><li>실무역량 판단 어려움</li><li>정량적 기준 부족</li><li>성과 예측 불가능</li></ul></div>', unsafe_allow_html=True); c3.markdown('<div class="problem-card"><h3>🔧 플랫폼 문제</h3><ul><li>성장여정 미반영</li><li>단순 키워드 매칭</li><li>최신 트렌드 부족</li></ul></div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    st.markdown("## 🧮 노동시장 변화 분석")
-    st.info("📊 최근 노동시장 데이터를 기반으로 새로운 채용 흐름을 분석합니다.")
-    st.markdown("- **고령자 채용 증가**: 60세 이상 인구의 취업자 수 증가율(+11.1%)이 전체 고용 증가를 주도하고 있습니다.\n- **상용직 중심의 안정적 고용**: 고용안정성이 높은 상용직이 전년 대비 37.5만 명 증가했습니다.\n- **신직업군 수요 증가**: AI, 데이터 분석, 플랫폼 서비스 등에서 새로운 직업 수요가 꾸준히 증가하고 있습니다.")
     st.markdown("---")
     
     data_loader = SmartDataLoader(); matching_engine = SmartMatchingEngine(); df = data_loader.load_from_database()
@@ -247,13 +255,14 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
+    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📈 성장 경로", "🏢 기업 인사이트", "💡 노동시장 트렌드", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
     with tabs[2]: render_growth_path(df, user_profile, user_category, matching_engine)
     with tabs[3]: render_company_insight(filtered_df)
-    with tabs[4]: render_prediction_analysis()
-    with tabs[5]: render_detail_table(filtered_df)
+    with tabs[4]: render_labor_trend_analysis()
+    with tabs[5]: render_prediction_analysis()
+    with tabs[6]: render_detail_table(filtered_df)
 
 if __name__ == "__main__":
     try:
