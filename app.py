@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 구문 오류 수정 및 전체 기능 통합)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 메인 요약 페이지 포함)
 
 import streamlit as st
 import pandas as pd
@@ -57,9 +57,11 @@ st.markdown("""
         font-size: 0.8rem;
         color: #757575;
     }
-    .st-emotion-cache-1g6go59 { /* Streamlit Metric의 delta 값을 조정 */
-        font-size: 0.9rem !important;
-    }
+    .problem-card { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 1.5rem; border-radius: 15px; color: white; margin: 0.5rem 0; box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37); min-height: 180px; }
+    .skill-match { display: inline-block; background: #e8f5e8; padding: 0.3rem 0.6rem; border-radius: 15px; border: 1px solid #4caf50; margin: 0.2rem; font-size: 0.9em; color: #145a32; }
+    .skill-gap { display: inline-block; background: #fff3e0; padding: 0.3rem 0.6rem; border-radius: 15px; border: 1px solid #ff9800; margin: 0.2rem; font-size: 0.9em; color: #9c5400;}
+    .growth-indicator { background: linear-gradient(90deg, #a8edea 0%, #fed6e3 100%); padding: 0.8rem; border-radius: 10px; margin: 0.5rem 0; }
+    h3 { padding-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -89,21 +91,37 @@ class SmartDataLoader:
             df.columns = [c.lower().replace(' ', '_').replace('.', '_') for c in df.columns]
             for col in ['join_reward', 'is_partner', 'is_bookmarked']:
                 if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            if 'created_at' not in df.columns: df['created_at'] = datetime.now()
-            df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+            df = self._add_sample_demographics(df)
             return df
         except Exception: return self._load_sample_data()
     def _create_database_from_csv(self):
         df = self._load_from_csv_fallback()
         if not df.empty: conn = sqlite3.connect(self.db_path); df.to_sql('jobs', conn, if_exists='replace', index=False); conn.close()
+    
+    def _add_sample_demographics(self, df):
+        if 'age' not in df.columns:
+            birth_years = [datetime(random.randint(1960, 2002), 1, 1) for _ in range(len(df))]
+            df['age'] = [(datetime.now() - by).days // 365 for by in birth_years]
+        if 'gender' not in df.columns:
+            df['gender'] = [random.choice(['남성', '여성']) for _ in range(len(df))]
+        if 'created_at' not in df.columns:
+            df['created_at'] = [datetime.now() - timedelta(days=random.randint(0, 730)) for _ in range(len(df))]
+        df['created_at'] = pd.to_datetime(df['created_at'])
+        return df
+
     def _load_sample_data(self):
-        st.warning("📁 데이터 파일을 찾을 수 없어 샘플 데이터를 표시합니다."); categories = ['DEVELOPER', 'DESIGN', 'MARKETING', 'MANAGEMENT']; regions = ['PANGYO', 'GANGNAM', 'HONGDAE', 'JONGNO']; companies = ['테크컴퍼니A', '스타트업B', '대기업C', 'AI스타트업G']; skills = {'DEVELOPER': ['Python', 'JavaScript', 'React', 'Node.js', 'Java', 'Docker', 'AWS'], 'DESIGN': ['Figma', 'Sketch', 'Adobe XD', 'Zeplin'], 'MARKETING': ['Google Analytics', 'SEO', 'Content Marketing'], 'MANAGEMENT': ['Project Management', 'Agile', 'Scrum']}; data = []
-        for i in range(200):
-            cat = random.choice(categories)
-            birth_date = datetime(random.randint(1960, 2002), random.randint(1, 12), random.randint(1, 28))
-            age = (datetime.now() - birth_date).days // 365
-            data.append({'id': i, 'job_category': cat, 'address_region': random.choice(regions), 'company_name': random.choice(companies), 'title': f'{cat.title()} 채용 - {random.choice(companies)}', 'status_name': random.choice(['모집 중', '마감']), 'status_code': 'HIRING', 'is_partner': random.choice([0, 1]), 'is_bookmarked': 0, 'join_reward': random.choice([0, 50000, 100000, 200000, 500000]), 'job_skill_keywords': ','.join(random.sample(skills[cat], k=random.randint(2, 4))), 'job_level': random.choice(['JUNIOR', 'SENIOR', 'LEAD', 'IRRELEVANT']), 'created_at': datetime.now() - timedelta(days=random.randint(0, 730)), 'gender': random.choice(['남성', '여성']), 'age': age})
-        return pd.DataFrame(data)
+        st.warning("📁 데이터 파일을 찾을 수 없어 샘플 데이터를 표시합니다.")
+        # 샘플 데이터 생성 로직 강화
+        df = pd.DataFrame([
+            {'id': i, 'job_category': random.choice(['DEVELOPER', 'DESIGN', 'MARKETING', 'MANAGEMENT']), 
+             'address_region': random.choice(['PANGYO', 'GANGNAM', 'HONGDAE', 'JONGNO']), 
+             'company_name': random.choice(['테크컴퍼니A', '스타트업B', '대기업C', 'AI스타트업G']),
+             'title': '샘플 채용 공고',
+             'is_partner': random.choice([0,1]),
+             'join_reward': random.choice([0, 50000, 100000, 200000, 500000]), 
+             'job_skill_keywords': 'Python,SQL,AWS',
+             'job_level': random.choice(['JUNIOR', 'SENIOR', 'LEAD', 'IRRELEVANT'])} for i in range(200)])
+        return self._add_sample_demographics(df)
 
 class SmartMatchingEngine:
     def calculate_skill_match(self, user_skills, job_requirements):
@@ -129,11 +147,8 @@ class SmartMatchingEngine:
 # ==============================================================================
 def render_main_summary(df):
     st.header("한눈에 보는 고용 현황")
-    if df.empty:
-        st.warning("요약 정보를 표시할 데이터가 없습니다.")
-        return
+    if df.empty: st.warning("요약 정보를 표시할 데이터가 없습니다."); return
 
-    # 1. KPI 카드
     c1, c2, c3 = st.columns(3)
     total_insured = len(df)
     with c1: st.markdown(f'<div class="kpi-card"><h3>피보험자 수 (전체)</h3><p>{total_insured:,}명</p></div>', unsafe_allow_html=True)
@@ -178,8 +193,8 @@ def render_main_summary(df):
         st.subheader("성별 분포")
         if 'gender' in df.columns:
             gender_counts = df['gender'].value_counts()
-            male_pct = gender_counts.get('남성', 0) / total_insured * 100
-            female_pct = gender_counts.get('여성', 0) / total_insured * 100
+            male_pct = gender_counts.get('남성', 0) / total_insured * 100 if total_insured > 0 else 0
+            female_pct = gender_counts.get('여성', 0) / total_insured * 100 if total_insured > 0 else 0
             c2_1, c2_2 = st.columns(2)
             with c2_1: st.markdown(f'<div class="kpi-card"><h3>남성 👨‍💼</h3><p>{male_pct:.1f}%</p><small>({gender_counts.get("남성", 0):,}명)</small></div>', unsafe_allow_html=True)
             with c2_2: st.markdown(f'<div class="kpi-card"><h3>여성 👩‍💼</h3><p>{female_pct:.1f}%</p><small>({gender_counts.get("여성", 0):,}명)</small></div>', unsafe_allow_html=True)
@@ -194,7 +209,6 @@ def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
         if skill_score > 20:
             success_prob = matching_engine.predict_success_probability(skill_score, growth_score)
             match_results.append({'idx': idx, 'title': row['title'], 'company': row['company_name'], 'skill_score': skill_score, 'success_prob': success_prob, 'matched': matched, 'missing': missing})
-
     st.subheader(f"🌟 '{', '.join(user_profile['skills'])}' 스킬과 맞는 추천 공고")
     if not match_results:
         st.warning("아쉽지만, 현재 필터 조건에 맞는 추천 공고가 없습니다. 필터를 조정해보세요.")
@@ -206,7 +220,6 @@ def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
             suggestions = [f"`{v}`" for k, v in adjacent_skills.items() if k.lower() in [s.lower() for s in user_profile['skills']]]
             if suggestions: st.write(f"현재 보유 스킬 기반으로 이런 기술을 추가 학습하면 좋습니다: {', '.join(suggestions)}")
         return
-
     for i, res in enumerate(sorted(match_results, key=lambda x: x['success_prob'], reverse=True)[:5]):
         with st.expander(f"🏆 #{i+1} {res['title']} - 최종 합격 확률: {res['success_prob']}%"):
             c1, c2 = st.columns([2, 1]);
@@ -265,42 +278,6 @@ def render_company_insight(filtered_df):
     top_companies = filtered_df['company_name'].value_counts().head(15)
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
-
-@st.cache_data(ttl=3600)
-def fetch_employment_report_list():
-    base_url = "https://eis.work24.go.kr"
-    list_url = f"{base_url}/eisps/opiv/selectOpivList.do"
-    try:
-        res = requests.get(list_url, timeout=10)
-        res.raise_for_status()
-        soup = BeautifulSoup(res.text, "html.parser")
-        rows = soup.select(".bbs-list tbody tr")
-        if not rows: return pd.DataFrame(), "게시물 목록(rows)을 찾을 수 없습니다."
-        report_data = []
-        for row in rows[:5]:
-            title_cell = row.select_one("td.title")
-            if not title_cell or not title_cell.find("a"): continue
-            link = title_cell.find("a")
-            title = link.text.strip()
-            onclick = link.get("onclick")
-            if not onclick: continue
-            seq_match = re.search(r"fncOpivDetail\('(\d+)'\)", onclick)
-            if seq_match:
-                seq = seq_match.group(1)
-                detail_url = f"https://eis.work24.go.kr/eisps/opiv/selectOpivDetail.do?seq={seq}"
-                report_data.append({"제목": title, "링크": detail_url})
-        if not report_data: return pd.DataFrame(), "파싱 가능한 리포트를 찾지 못했습니다."
-        return pd.DataFrame(report_data), "SUCCESS"
-    except Exception as e: return pd.DataFrame(), f"크롤링 오류: {e}"
-
-def render_employment_report_list_tab():
-    st.header("📚 고용행정통계 리포트 (크롤링)")
-    df, status = fetch_employment_report_list()
-    if status == "SUCCESS" and not df.empty:
-        st.dataframe(df, use_container_width=True, hide_index=True,
-                     column_config={"링크": st.column_config.LinkColumn("상세보기", display_text="🔗 바로가기")})
-    else:
-        st.error(f"리포트 목록을 불러오는 데 실패했습니다. (상태: {status})")
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
@@ -361,15 +338,15 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["⭐ 메인 요약", "🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 동향", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
+    # API 호출이 없는 "보험자 통계" 탭은 제거하고, "통계 리포트"를 "노동시장 동향"으로 명명
+    tabs = st.tabs(["⭐ 메인 요약", "🎯 스마트 매칭", "📊 시장 분석", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_main_summary(df)
     with tabs[1]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[2]: render_market_analysis(filtered_df)
-    with tabs[3]: render_employment_report_list()
-    with tabs[4]: render_growth_path(df, user_profile, user_category, matching_engine)
-    with tabs[5]: render_company_insight(filtered_df)
-    with tabs[6]: render_prediction_analysis()
-    with tabs[7]: render_detail_table(filtered_df)
+    with tabs[3]: render_growth_path(df, user_profile, user_category, matching_engine)
+    with tabs[4]: render_company_insight(filtered_df)
+    with tabs[5]: render_prediction_analysis()
+    with tabs[6]: render_detail_table(filtered_df)
 
 if __name__ == "__main__":
     try:
