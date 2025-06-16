@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 통합 완성본, 노동시장 트렌드 탭 추가)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 실시간 API 연동)
 
 import streamlit as st
 import pandas as pd
@@ -10,6 +10,7 @@ from pathlib import Path
 import logging
 import random
 import re
+import requests # API 호출을 위한 라이브러리
 
 # ==============================================================================
 # 1. 페이지 및 환경 설정
@@ -178,19 +179,52 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-def render_labor_trend_analysis():
-    st.header("📊 노동시장 통계 기반 트렌드 분석")
-    st.subheader("📌 상용직 증가 추이 시각화")
-    years = [2020, 2021, 2022, 2023, 2024, 2025]
-    increase = [20.1, 22.3, 25.7, 28.6, 33.0, 37.5]
-    fig = px.line(x=years, y=increase, markers=True, title="2020-2025 상용직 근로자 수 증가 추이 (샘플)", labels={'x': '연도', 'y': '상용직 근로자 수 (만 명)'})
-    fig.update_traces(line=dict(color="#1f77b4", width=4)); st.plotly_chart(fig, use_container_width=True)
+# --- 신규 함수: API 연동 및 시각화 ---
+@st.cache_data(ttl=3600) # 1시간 동안 캐시 유지
+def fetch_labor_trend_data():
+    url = "https://eis.work24.go.kr/eisps/opiv/selectOpivList.do"
+    headers = {"Content-Type": "application/json"}
+    payload = {"pageIndex": 1, "pageUnit": 100} # 100개 데이터 요청
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=5)
+        if response.status_code == 200:
+            return response.json().get('resultList', [])
+        else:
+            logger.error(f"API Error: Status code {response.status_code}")
+            return []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API Request failed: {e}")
+        return []
 
-    st.subheader("📊 산업별 채용 트렌드 (샘플 데이터)")
-    industry_df = pd.DataFrame({'산업': ['IT/소프트웨어', '플랫폼서비스', '헬스케어', '제조업', '유통/물류'], '2024 채용공고 수': [820, 640, 310, 480, 390]})
-    fig2 = px.bar(industry_df, x='2024 채용공고 수', y='산업', orientation='h', title="2024 산업별 채용공고 수 추정"); fig2.update_layout(yaxis={'categoryorder': 'total ascending'}); st.plotly_chart(fig2, use_container_width=True)
+def render_labor_trend_analysis():
+    st.header("💡 실시간 노동시장 트렌드 (고용노동부 API)")
     
-    st.subheader("👴 고령자 맞춤 채용 공고 비율"); st.markdown("60세 이상 지원 가능 공고 비율 (샘플): 약 13.2%"); st.progress(0.132)
+    trend_data = fetch_labor_trend_data()
+    if trend_data:
+        trends_df = pd.DataFrame(trend_data)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("📈 최신 인기 직종")
+            top_jobs = trends_df['occptNm'].value_counts().head(10)
+            fig_jobs = px.bar(top_jobs, y=top_jobs.index, x=top_jobs.values, orientation='h', title="최근 등록된 인기 직종 TOP 10", labels={'y': '직종', 'x':'공고 수'})
+            fig_jobs.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig_jobs, use_container_width=True)
+
+        with c2:
+            st.subheader("📍 지역별 채용 수요")
+            top_regions = trends_df['ctpvNm'].value_counts().head(10)
+            fig_regions = px.bar(top_regions, y=top_regions.index, x=top_regions.values, orientation='h', title="최근 채용공고 상위 지역 TOP 10", labels={'y': '지역', 'x':'공고 수'})
+            fig_regions.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig_regions, use_container_width=True)
+
+        st.subheader("👴 고령자 친화 채용 비율")
+        # '연령무관' 또는 '60'이 포함된 경우를 고령자 친화로 간주
+        senior_friendly = trends_df[trends_df['ageClNm'].str.contains('무관|60', na=False)]
+        ratio = len(senior_friendly) / len(trends_df) if len(trends_df) > 0 else 0
+        st.metric(label="60세 이상 지원 가능 공고 비율", value=f"{ratio*100:.1f}%")
+        st.progress(ratio)
+    else:
+        st.warning("⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
+
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
@@ -255,12 +289,12 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📈 성장 경로", "🏢 기업 인사이트", "💡 노동시장 트렌드", "🔮 예측 분석", "📋 상세 데이터"])
+    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 트렌드", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
-    with tabs[2]: render_growth_path(df, user_profile, user_category, matching_engine)
-    with tabs[3]: render_company_insight(filtered_df)
-    with tabs[4]: render_labor_trend_analysis()
+    with tabs[2]: render_labor_trend_analysis()
+    with tabs[3]: render_growth_path(df, user_profile, user_category, matching_engine)
+    with tabs[4]: render_company_insight(filtered_df)
     with tabs[5]: render_prediction_analysis()
     with tabs[6]: render_detail_table(filtered_df)
 
