@@ -5,6 +5,7 @@ streamlit-option-menu>=0.3.6
 # 데이터 처리
 pandas>=1.5.0
 numpy>=1.21.0
+scikit-learn>=1.0
 
 # 시각화
 plotly>=5.0.0
