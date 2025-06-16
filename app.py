@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 필터 로직 수정)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 필터 요약 로직 수정)
 
 import streamlit as st
 import pandas as pd
@@ -216,32 +216,30 @@ def main():
         selected_levels = st.multiselect("📈 직무 레벨", df['job_level'].dropna().unique(), default=list(df['job_level'].dropna().unique())); keyword_input = st.text_input("🔍 키워드 검색 (공고명/회사명)", "")
         if st.button("🔄 데이터 새로고침"): st.cache_data.clear(); st.rerun()
 
-    # <<< 오류 수정: 안정적인 순차 필터링 로직으로 변경
     filtered_df = df.copy()
-    if user_category != '전체':
-        filtered_df = filtered_df[filtered_df['job_category'] == user_category]
-    if selected_region != '전체':
-        filtered_df = filtered_df[filtered_df['address_region'] == selected_region]
-    if reward_filter:
-        filtered_df = filtered_df[filtered_df['join_reward'] > 0]
-    if partner_filter:
-        filtered_df = filtered_df[filtered_df['is_partner'] == 1]
-    if selected_levels:
-        filtered_df = filtered_df[filtered_df['job_level'].isin(selected_levels)]
-    
-    # join_reward_range는 항상 값이 있으므로 조건 없이 필터링
+    if user_category != '전체': filtered_df = filtered_df[filtered_df['job_category'] == user_category]
+    if selected_region != '전체': filtered_df = filtered_df[filtered_df['address_region'] == selected_region]
+    if reward_filter: filtered_df = filtered_df[filtered_df['join_reward'] > 0]
+    if partner_filter: filtered_df = filtered_df[filtered_df['is_partner'] == 1]
+    if selected_levels: filtered_df = filtered_df[filtered_df['job_level'].isin(selected_levels)]
     filtered_df = filtered_df[filtered_df['join_reward'].between(join_reward_range[0], join_reward_range[1])]
-    
     if keyword_input:
         keyword = keyword_input.lower()
-        # 문자열이 아닌 데이터가 있어도 오류가 나지 않도록 str.contains(na=False) 사용
-        mask = (filtered_df['title'].str.lower().str.contains(keyword, na=False)) | \
-               (filtered_df['company_name'].str.lower().str.contains(keyword, na=False))
+        mask = (filtered_df['title'].str.lower().str.contains(keyword, na=False)) | (filtered_df['company_name'].str.lower().str.contains(keyword, na=False))
         filtered_df = filtered_df[mask]
 
-    # (1) 필터 요약 배너
-    summary_list = [f"**직무:** `{user_category}`" if user_category != '전체' else '', f"**지역:** `{selected_region}`" if selected_region != '전체' else '', f"**키워드:** `{keyword_input}`" if keyword_input else '']
-    active_filters = " | ".join(filter(None, summary_list))
+    # <<< 오류 수정: 필터 요약 배너 로직 변경
+    summary_list = []
+    if user_profile['skills']:
+        summary_list.append(f"**보유 스킬:** `{', '.join(user_profile['skills'])}`")
+    if user_category != '전체':
+        summary_list.append(f"**직무:** `{user_category}`")
+    if selected_region != '전체':
+        summary_list.append(f"**지역:** `{selected_region}`")
+    if keyword_input:
+        summary_list.append(f"**키워드:** `{keyword_input}`")
+
+    active_filters = " | ".join(summary_list)
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
     tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
