@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 크롤링 로직 강화)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 보험자 통계 API 및 리포트 크롤링)
 
 import streamlit as st
 import pandas as pd
@@ -11,6 +11,7 @@ import logging
 import random
 import re
 import requests
+import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 
 # ==============================================================================
@@ -179,68 +180,77 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-# <<< 오류 수정: 크롤링 로직 강화 >>>
 @st.cache_data(ttl=3600)
-def fetch_latest_labor_report():
-    base_url = "https://eis.work24.go.kr"
-    list_url = f"{base_url}/eisps/opiv/selectOpivList.do"
+def fetch_insured_stats(closStdrYm, rsdAreaCd, sxdsCd, ageCd):
+    url = "https://eis.work24.go.kr/opi/ipsApi.do" # 피보험자 API URL
+    auth_key = st.secrets.get("EIS_AUTH_KEY")
+    if not auth_key: return pd.DataFrame(), "NO_KEY"
+    params = {'authKey': auth_key, 'apiSecd': 'OPIB', 'rernSecd': 'XML', 'display': 100, 'closStdrYm': closStdrYm, 'rsdAreaCd': rsdAreaCd, 'sxdsCd': sxdsCd, 'ageCd': ageCd}
     try:
-        response = requests.get(list_url, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 첫 번째 행(가장 최신 게시물)을 선택
-        latest_row = soup.select_one(".bbs-list tbody tr")
-        if not latest_row:
-            return None, "최신 리포트 목록을 찾을 수 없습니다."
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200 or '<!DOCTYPE html>' in response.text: return pd.DataFrame(), "API_ERROR"
+        root = ET.fromstring(response.text)
+        data_list = [{'기준년월': item.findtext('dwClosYm'), '시군구': item.findtext('rsdAreaCdnm'), '성별': item.findtext('sxdn'), '연령': item.findtext('ageCdnm'), '피보험자수': int(item.findtext('prtyIpnb', '0')), '취득자수': int(item.findtext('prtyAcqsNmpr', '0')), '상실자수': int(item.findtext('prtyFrftNmpr', '0'))} for item in root.findall('.//rqst')]
+        return pd.DataFrame(data_list), "SUCCESS"
+    except (requests.exceptions.RequestException, ET.ParseError) as e: return pd.DataFrame(), "REQUEST_FAIL"
 
-        # 제목은 두 번째 td 안에 있음
-        title_cell = latest_row.select_one("td.title")
-        if not title_cell or not title_cell.find('a'):
-            return None, "리포트 제목 또는 링크를 찾을 수 없습니다."
+def render_insured_stat_analysis():
+    st.header("📊 고용노동부 피보험자 통계 분석")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: closStdrYm = st.text_input("📅 기준년월 (YYYYMM)", value=datetime.now().strftime('%Y%m'))
+    with col2: rsdAreaCd_key = st.selectbox("🏙️ 지역", ["서울 강남구", "서울 종로구", "부산 해운대구"])
+    with col3: sxdsCd = st.radio("👫 성별", ["1", "2"], format_func=lambda x: "남성" if x=="1" else "여성", horizontal=True)
+    with col4: ageCd_key = st.selectbox("🎂 연령대", ["25~29세", "30~34세", "35~39세"])
+    
+    area_code_map = {"서울 강남구": "11680", "서울 종로구": "11110", "부산 해운대구": "26350"}
+    age_code_map = {"25~29세": "04", "30~34세": "05", "35~39세": "06"}
+    
+    df, status = fetch_insured_stats(closStdrYm, area_code_map[rsdAreaCd_key], sxdsCd, age_code_map[ageCd_key])
+    
+    if status == "SUCCESS" and not df.empty:
+        st.dataframe(df, use_container_width=True)
+        st.subheader("📈 피보험자/취득자/상실자 비교")
+        chart_df = df.melt(id_vars=["시군구", "연령"], value_vars=["피보험자수", "취득자수", "상실자수"], var_name="구분", value_name="인원수")
+        fig = px.bar(chart_df, x="구분", y="인원수", color="구분", title=f"{closStdrYm} {rsdAreaCd_key} 보험자 지표", labels={'인원수': '인원 수'})
+        st.plotly_chart(fig, use_container_width=True)
+    elif status == "NO_KEY": st.error("🚨 API 인증키가 설정되지 않았습니다. Streamlit Cloud의 Secrets에 `EIS_AUTH_KEY`를 추가해주세요.")
+    else: st.warning(f"데이터를 불러오지 못했습니다. (상태: {status})")
 
-        link_tag = title_cell.find('a')
-        title = link_tag.text.strip()
-        
-        # seq ID 추출 (onclick 또는 href 모두 시도)
-        seq = None
-        if 'onclick' in link_tag.attrs:
-            seq_match = re.search(r"fncOpivDetail\('(\d+)'\)", link_tag['onclick'])
-            if seq_match: seq = seq_match.group(1)
-        
-        if not seq and 'href' in link_tag.attrs:
-            seq_match = re.search(r"seq=(\d+)", link_tag['href'])
-            if seq_match: seq = seq_match.group(1)
+@st.cache_data(ttl=3600)
+def fetch_employment_report_list():
+    url = "https://eis.work24.go.kr/eisps/opiv/selectOpivList.do"
+    try:
+        res = requests.get(url)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "html.parser")
+        rows = soup.select("table.board_list tbody tr")
+        report_data = []
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 2:
+                date = cols[0].text.strip()
+                title_tag = cols[1].find("a")
+                title = title_tag.text.strip()
+                onclick_attr = title_tag.get("onclick")
+                if onclick_attr:
+                    seq_match = re.search(r"fncOpivDetail\('(\d+)'\)", onclick_attr)
+                    if seq_match:
+                        seq = seq_match.group(1)
+                        detail_url = f"https://eis.work24.go.kr/eisps/opiv/selectOpivDetail.do?seq={seq}"
+                        report_data.append({"날짜": date, "제목": title, "링크": detail_url})
+        return pd.DataFrame(report_data), "SUCCESS"
+    except Exception as e:
+        logger.error(f"크롤링 중 오류 발생: {e}")
+        return pd.DataFrame(), f"크롤링 오류: {e}"
 
-        if not seq: return None, "리포트 고유 ID(seq)를 추출할 수 없습니다."
-        
-        detail_url = f"{base_url}/eisps/opiv/selectOpivDetail.do?seq={seq}"
-        detail_response = requests.get(detail_url, timeout=10)
-        detail_soup = BeautifulSoup(detail_response.text, 'html.parser')
-        
-        file_links = [{'name': a_tag.text.strip(), 'url': f"{base_url}{a_tag['href']}"} for a_tag in detail_soup.select(".file-list a")]
-        
-        return {'title': title, 'detail_url': detail_url, 'files': file_links}, "SUCCESS"
-        
-    except requests.exceptions.RequestException as e: return None, f"네트워크 오류: {e}"
-    except Exception as e: return None, f"페이지 분석 중 오류: {e}"
-
-def render_labor_trend_analysis():
-    st.header("💡 최신 노동시장 동향 리포트")
-    with st.spinner("최신 고용노동부 보도자료를 확인하는 중..."):
-        report_info, status = fetch_latest_labor_report()
-        
-    if status == "SUCCESS" and report_info:
-        st.subheader(f"📄 최신 리포트: {report_info['title']}")
-        st.markdown(f"[상세 페이지 바로가기]({report_info['detail_url']})")
-        if report_info['files']:
-            st.markdown("**첨부파일 다운로드:**")
-            for file in report_info['files']:
-                st.link_button(f"📥 {file['name']}", file['url'])
-        else:
-            st.info("첨부파일이 없습니다.")
+def render_employment_report_list_tab():
+    st.header("📚 고용행정통계 리포트 (크롤링)")
+    df, status = fetch_employment_report_list()
+    if status == "SUCCESS" and not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True,
+                     column_config={"링크": st.column_config.LinkColumn("상세보기", display_text="🔗 바로가기")})
     else:
-        st.warning(f"⚠️ 최신 노동시장 리포트를 불러오지 못했습니다. (상태: {status})")
+        st.error(f"리포트 목록을 불러오는 데 실패했습니다. (상태: {status})")
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
@@ -305,14 +315,15 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 동향", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
+    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📊 보험자 통계", "📚 통계 리포트", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
-    with tabs[2]: render_labor_trend_analysis()
-    with tabs[3]: render_growth_path(df, user_profile, user_category, matching_engine)
-    with tabs[4]: render_company_insight(filtered_df)
-    with tabs[5]: render_prediction_analysis()
-    with tabs[6]: render_detail_table(filtered_df)
+    with tabs[2]: render_insured_stat_analysis()
+    with tabs[3]: render_employment_report_list()
+    with tabs[4]: render_growth_path(df, user_profile, user_category, matching_engine)
+    with tabs[5]: render_company_insight(filtered_df)
+    with tabs[6]: render_prediction_analysis()
+    with tabs[7]: render_detail_table(filtered_df)
 
 if __name__ == "__main__":
     try:
