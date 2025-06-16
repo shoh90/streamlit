@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (오류 수정 및 안정성 강화 버전)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 필터 로직 수정)
 
 import streamlit as st
 import pandas as pd
@@ -52,7 +52,7 @@ class SmartDataLoader:
             for col in ['join_reward', 'is_partner', 'is_bookmarked']:
                 if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             return df
-        except Exception as e: return _self._load_from_csv_fallback()
+        except Exception: return _self._load_from_csv_fallback()
     def _load_from_csv_fallback(self):
         try:
             dfs = [pd.read_csv(self.data_dir / f).assign(job_category=cat) for cat, f in self.csv_files.items() if (self.data_dir / f).exists()]
@@ -62,7 +62,7 @@ class SmartDataLoader:
             for col in ['join_reward', 'is_partner', 'is_bookmarked']:
                 if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             return df
-        except Exception as e: return self._load_sample_data()
+        except Exception: return self._load_sample_data()
     def _create_database_from_csv(self):
         df = self._load_from_csv_fallback()
         if not df.empty: conn = sqlite3.connect(self.db_path); df.to_sql('jobs', conn, if_exists='replace', index=False); conn.close()
@@ -93,30 +93,14 @@ class SmartMatchingEngine:
 # ==============================================================================
 def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
     st.header("🎯 스마트 매칭 결과")
-    if not user_profile['skills']:
-        st.info("👆 사이드바에 보유 기술을 입력하면 맞춤 공고를 추천해 드립니다.")
-        return
+    if not user_profile['skills']: st.info("👆 사이드바에 보유 기술을 입력하면 맞춤 공고를 추천해 드립니다."); return
 
-    # <<< 오류 수정: 복잡한 List Comprehension을 명확한 for 반복문으로 변경
     match_results = []
     for idx, row in filtered_df.iterrows():
-        # calculate_skill_match 함수는 항상 (점수, 매칭리스트, 미매칭리스트) 튜플을 반환
-        score, matched, missing = matching_engine.calculate_skill_match(
-            user_profile['skills'], row.get('job_skill_keywords')
-        )
-        
-        if score > 20: # 최소 매칭 점수
-            match_results.append({
-                'idx': idx, 
-                'title': row['title'], 
-                'company': row['company_name'], 
-                'score': score, 
-                'matched': matched, 
-                'missing': missing
-            })
+        score, matched, missing = matching_engine.calculate_skill_match(user_profile['skills'], row.get('job_skill_keywords'))
+        if score > 20: match_results.append({'idx': idx, 'title': row['title'], 'company': row['company_name'], 'score': score, 'matched': matched, 'missing': missing})
 
     st.subheader(f"🌟 '{', '.join(user_profile['skills'])}' 스킬과 맞는 추천 공고")
-    
     if not match_results:
         st.warning("아쉽지만, 현재 필터 조건에 맞는 추천 공고가 없습니다. 필터를 조정해보세요.")
         with st.expander("🤔 혹시 이런 건 어떠세요? (대안 제안 기능)"):
@@ -124,7 +108,6 @@ def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
             current_category = filtered_df['job_category'].iloc[0] if not filtered_df.empty else None
             other_categories = [cat for cat in all_df['job_category'].unique() if cat != current_category]
             if other_categories: st.write(f"현재 직무 외에도 이런 직무들이 있습니다: `{'`, `'.join(other_categories[:3])}`")
-            
             st.markdown("**인접 기술 스택 학습하기**")
             adjacent_skills = {'React': 'Vue.js', 'Python': 'Go', 'AWS': 'GCP, Azure', 'Docker': 'Kubernetes'}
             suggestions = [f"`{v}`" for k, v in adjacent_skills.items() if k.lower() in [s.lower() for s in user_profile['skills']]]
@@ -133,7 +116,7 @@ def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
 
     for i, res in enumerate(sorted(match_results, key=lambda x: x['score'], reverse=True)[:5]):
         with st.expander(f"🏆 #{i+1} {res['title']} - 매칭도: {res['score']:.1f}%"):
-            c1, c2 = st.columns([2, 1])
+            c1, c2 = st.columns([2, 1]);
             with c1:
                 st.write(f"**회사:** {res['company']}")
                 if res['matched']: st.markdown("**🎯 보유 스킬 매치:**" + "".join([f'<div class="skill-match">✅ {s.capitalize()}</div>' for s in res['matched']]), unsafe_allow_html=True)
@@ -143,9 +126,8 @@ def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
                 fig.update_layout(height=200, margin=dict(l=20, r=20, t=40, b=20)); st.plotly_chart(fig, use_container_width=True, key=f"match_gauge_{res['idx']}")
 
 def render_market_analysis(filtered_df):
-    st.header("📊 채용 시장 트렌드 분석")
+    st.header("📊 채용 시장 트렌드 분석");
     if filtered_df.empty: st.warning("표시할 데이터가 없습니다. 필터를 조정해주세요."); return
-
     c1, c2 = st.columns(2)
     with c1:
         counts = filtered_df['job_category'].value_counts()
@@ -155,7 +137,6 @@ def render_market_analysis(filtered_df):
         counts = filtered_df['address_region'].value_counts().head(10)
         fig = px.bar(counts, y=counts.index, x=counts.values, orientation='h', title="상위 10개 지역 채용 현황", labels={'y':'지역', 'x':'공고 수'})
         fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="region_bar_market")
-
     st.subheader("🔥 인기 기술 스택 트렌드")
     if 'job_skill_keywords' in filtered_df.columns:
         skills = filtered_df['job_skill_keywords'].dropna().str.split(',').explode().str.strip()
@@ -167,14 +148,12 @@ def render_market_analysis(filtered_df):
 def render_growth_path(df, user_profile, user_category, matching_engine):
     st.header("📈 개인 성장 경로 분석");
     if not user_profile['skills']: st.info("👆 사이드바에 보유 기술을 입력하면 성장 경로를 분석해 드립니다."); return
-    
     st.subheader("🚀 당신의 성장 잠재력"); growth_score, factors = matching_engine.analyze_growth_potential(user_profile); c1, c2 = st.columns([1, 2])
     with c1: fig = go.Figure(go.Indicator(mode="gauge+number", value=growth_score, title={'text': "성장 잠재력"})); st.plotly_chart(fig, use_container_width=True, key="growth_gauge_path")
     with c2:
         st.markdown("**🌱 성장 요인 분석:**");
         if factors: [st.markdown(f'<div class="growth-indicator">{f}</div>', unsafe_allow_html=True) for f in factors]
         else: st.write("성장 프로필을 입력하면 더 정확한 분석이 가능합니다.")
-    
     st.subheader("🎯 스킬 갭 분석")
     if 'job_skill_keywords' in df.columns:
         target_df = df[df['job_category'] == user_category] if user_category != '전체' else df
@@ -237,16 +216,30 @@ def main():
         selected_levels = st.multiselect("📈 직무 레벨", df['job_level'].dropna().unique(), default=list(df['job_level'].dropna().unique())); keyword_input = st.text_input("🔍 키워드 검색 (공고명/회사명)", "")
         if st.button("🔄 데이터 새로고침"): st.cache_data.clear(); st.rerun()
 
-    filtered_df = df[
-        (df['job_category'] == user_category if user_category != '전체' else True) &
-        (df['address_region'] == selected_region if selected_region != '전체' else True) &
-        (df['join_reward'] > 0 if reward_filter else True) &
-        (df['is_partner'] == 1 if partner_filter else True) &
-        (df['job_level'].isin(selected_levels)) &
-        (df['join_reward'].between(join_reward_range[0], join_reward_range[1]))
-    ]
-    if keyword_input: filtered_df = filtered_df[filtered_df.apply(lambda row: keyword_input.lower() in str(row.get('title', '')).lower() or keyword_input.lower() in str(row.get('company_name', '')).lower(), axis=1)]
+    # <<< 오류 수정: 안정적인 순차 필터링 로직으로 변경
+    filtered_df = df.copy()
+    if user_category != '전체':
+        filtered_df = filtered_df[filtered_df['job_category'] == user_category]
+    if selected_region != '전체':
+        filtered_df = filtered_df[filtered_df['address_region'] == selected_region]
+    if reward_filter:
+        filtered_df = filtered_df[filtered_df['join_reward'] > 0]
+    if partner_filter:
+        filtered_df = filtered_df[filtered_df['is_partner'] == 1]
+    if selected_levels:
+        filtered_df = filtered_df[filtered_df['job_level'].isin(selected_levels)]
+    
+    # join_reward_range는 항상 값이 있으므로 조건 없이 필터링
+    filtered_df = filtered_df[filtered_df['join_reward'].between(join_reward_range[0], join_reward_range[1])]
+    
+    if keyword_input:
+        keyword = keyword_input.lower()
+        # 문자열이 아닌 데이터가 있어도 오류가 나지 않도록 str.contains(na=False) 사용
+        mask = (filtered_df['title'].str.lower().str.contains(keyword, na=False)) | \
+               (filtered_df['company_name'].str.lower().str.contains(keyword, na=False))
+        filtered_df = filtered_df[mask]
 
+    # (1) 필터 요약 배너
     summary_list = [f"**직무:** `{user_category}`" if user_category != '전체' else '', f"**지역:** `{selected_region}`" if selected_region != '전체' else '', f"**키워드:** `{keyword_input}`" if keyword_input else '']
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
