@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 구문 오류 수정)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 보험자 통계 API 연동)
 
 import streamlit as st
 import pandas as pd
@@ -98,14 +98,11 @@ class SmartMatchingEngine:
 # ==============================================================================
 # 4. 뷰 함수 정의
 # ==============================================================================
-
-# <<< 오류 수정: 모든 뷰 함수의 전체 내용을 복원 >>>
 def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
     st.header("🎯 스마트 매칭 결과")
     if not user_profile['skills']: st.info("👆 사이드바에 보유 기술을 입력하면 맞춤 공고를 추천해 드립니다."); return
 
     growth_score, _ = matching_engine.analyze_growth_potential(user_profile)
-    
     match_results = []
     for idx, row in filtered_df.iterrows():
         skill_score, matched, missing = matching_engine.calculate_skill_match(user_profile['skills'], row.get('job_skill_keywords'))
@@ -184,40 +181,56 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
+# --- 신규 함수: 보험자 통계 API 연동 및 시각화 ---
 @st.cache_data(ttl=3600)
-def fetch_labor_trend_data():
-    url = "https://eis.work24.go.kr/opi/joApi.do"
-    auth_key = st.secrets.get("EIS_AUTH_KEY", "YOUR_AUTH_KEY_HERE")
-    if auth_key == "YOUR_AUTH_KEY_HERE":
-        return None, "NO_KEY"
-    params = {'authKey': auth_key, 'apiSecd': 'OPIA', 'rernSecd': 'XML', 'display': 100, 'closStdrYm': datetime.now().strftime('%Y%m')}
+def fetch_insured_stats(closStdrYm, rsdAreaCd, sxdsCd, ageCd):
+    url = "https://eis.work24.go.kr/opi/ipsApi.do" # 피보험자 API URL로 수정
+    auth_key = st.secrets.get("EIS_AUTH_KEY")
+    if not auth_key: return None, "NO_KEY"
+    
+    params = {
+        'authKey': auth_key, 'apiSecd': 'OPIB', 'rernSecd': 'XML', 'display': 100,
+        'closStdrYm': closStdrYm, 'rsdAreaCd': rsdAreaCd, 'sxdsCd': sxdsCd, 'ageCd': ageCd
+    }
     try:
         response = requests.get(url, params=params, timeout=10)
         if response.status_code != 200 or '<!DOCTYPE html>' in response.text:
+            logger.error(f"API Error: Status {response.status_code}. Response: {response.text[:200]}")
             return None, "API_ERROR"
         root = ET.fromstring(response.text)
-        data_list = [{'company': item.findtext('company'), 'title': item.findtext('title'), 'region': item.findtext('region'), 'sal': item.findtext('sal'), 'minEdubg': item.findtext('minEdubg'), 'career': item.findtext('career')} for item in root.findall('.//item')]
-        return data_list, "SUCCESS"
+        data_list = [{'기준년월': item.findtext('dwClosYm'), '시군구': item.findtext('rsdAreaCdnm'), '성별': item.findtext('sxdn'), '연령': item.findtext('ageCdnm'), '피보험자수': int(item.findtext('prtyIpnb', '0')), '취득자수': int(item.findtext('prtyAcqsNmpr', '0')), '상실자수': int(item.findtext('prtyFrftNmpr', '0'))} for item in root.findall('.//rqst')]
+        return pd.DataFrame(data_list), "SUCCESS"
     except (requests.exceptions.RequestException, ET.ParseError) as e:
+        logger.error(f"API Request or XML Parsing failed: {e}")
         return None, "REQUEST_FAIL"
 
-def render_labor_trend_analysis():
-    st.header("💡 실시간 노동시장 트렌드 (고용노동부 API)")
-    with st.spinner("실시간 고용 데이터를 불러오는 중..."):
-        trend_data, status = fetch_labor_trend_data()
+def render_insured_stat_analysis():
+    st.header("📊 고용노동부 피보험자 통계 분석")
     
-    if status == "SUCCESS" and trend_data:
-        trends_df = pd.DataFrame(trend_data)
-        st.subheader("🗺️ 지도 기반 실시간 채용 수요")
-        location_dict = {"서울": [37.5665, 126.9780], "부산": [35.1796, 129.0756], "대구": [35.8714, 128.6014], "인천": [37.4563, 126.7052], "광주": [35.1595, 126.8526], "대전": [36.3504, 127.3845], "울산": [35.5384, 129.3114], "세종": [36.4801, 127.2891], "경기": [37.4138, 127.5183], "강원": [37.8228, 128.1555], "충북": [36.6358, 127.4917], "충남": [36.5184, 126.8000], "전북": [35.7167, 127.1442], "전남": [34.8161, 126.4630], "경북": [36.4919, 128.8889], "경남": [35.4606, 128.2132], "제주": [33.4996, 126.5312]}
-        trends_df['region_simple'] = trends_df['region'].str.split().str[0].str.replace("특별시", "").str.replace("광역시", "").str.replace("특별자치시", "").str.replace("특별자치도", "")
-        region_counts = trends_df['region_simple'].value_counts()
-        m = folium.Map(location=[36.5, 127.8], zoom_start=7, tiles="cartodbpositron")
-        for region, count in region_counts.items():
-            if region in location_dict: folium.CircleMarker(location=location_dict[region], radius=max(5, count), popup=f"{region}: {count}건", color='#3186cc', fill=True, fill_color='#3186cc', fill_opacity=0.6).add_to(m)
-        st_folium(m, width=1000, height=400, key="folium_map")
-    elif status == "NO_KEY": st.error("🚨 API 인증키가 설정되지 않았습니다. Streamlit Cloud의 Secrets에 `EIS_AUTH_KEY`를 추가해주세요.")
-    else: st.warning(f"⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다 (오류 코드: {status}). 잠시 후 다시 시도해주세요.")
+    # 사용자 입력 필터
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: closStdrYm = st.text_input("📅 기준년월 (YYYYMM)", value=datetime.now().strftime('%Y%m'))
+    with col2: rsdAreaCd = st.selectbox("🏙️ 지역코드", {"서울 강남구": "11680", "서울 종로구": "11110", "부산 해운대구": "26350"}.keys())
+    with col3: sxdsCd = st.radio("👫 성별", ["1", "2"], format_func=lambda x: "남성" if x=="1" else "여성", horizontal=True)
+    with col4: ageCd = st.selectbox("🎂 연령대", {"25~29세": "04", "30~34세": "05", "35~39세": "06"}.keys())
+
+    # 딕셔너리 키를 코드로 변환
+    area_code_map = {"서울 강남구": "11680", "서울 종로구": "11110", "부산 해운대구": "26350"}
+    age_code_map = {"25~29세": "04", "30~34세": "05", "35~39세": "06"}
+    
+    with st.spinner("API에서 보험자 통계 데이터를 불러오는 중..."):
+        df, status = fetch_insured_stats(closStdrYm, area_code_map[rsdAreaCd], sxdsCd, age_code_map[ageCd])
+    
+    if status == "SUCCESS" and not df.empty:
+        st.dataframe(df, use_container_width=True)
+        st.subheader("📈 피보험자/취득자/상실자 비교")
+        chart_df = df.melt(id_vars=["시군구", "연령"], value_vars=["피보험자수", "취득자수", "상실자수"], var_name="구분", value_name="인원수")
+        fig = px.bar(chart_df, x="구분", y="인원수", color="구분", title=f"{closStdrYm} {rsdAreaCd} 보험자 지표", labels={'인원수': '인원 수'})
+        st.plotly_chart(fig, use_container_width=True)
+    elif status == "NO_KEY":
+        st.error("🚨 API 인증키가 설정되지 않았습니다. Streamlit Cloud의 Secrets에 `EIS_AUTH_KEY`를 추가해주세요.")
+    else:
+        st.warning(f"데이터를 불러오지 못했습니다. (상태: {status})")
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
@@ -282,10 +295,10 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 트렌드", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
+    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📊 보험자 통계", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
-    with tabs[2]: render_labor_trend_analysis()
+    with tabs[2]: render_insured_stat_analysis()
     with tabs[3]: render_growth_path(df, user_profile, user_category, matching_engine)
     with tabs[4]: render_company_insight(filtered_df)
     with tabs[5]: render_prediction_analysis()
