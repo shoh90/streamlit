@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, API 인증 및 오류 처리 강화)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 구문 오류 수정)
 
 import streamlit as st
 import pandas as pd
@@ -96,85 +96,147 @@ class SmartMatchingEngine:
 
 
 # ==============================================================================
-# 4. 뷰(View) 함수 정의
+# 4. 뷰 함수 정의
 # ==============================================================================
-# (이하 뷰 함수들은 이전과 동일하여 간결함을 위해 생략. 실제 코드에는 모두 포함되어야 함)
-def render_smart_matching(...): ...
-def render_market_analysis(...): ...
-def render_growth_path(...): ...
-def render_company_insight(...): ...
-def render_prediction_analysis(...): ...
-def render_detail_table(...): ...
 
-# <<< 수정된 부분 시작 >>>
-@st.cache_data(ttl=3600) # 1시간 동안 API 호출 결과 캐시
+# <<< 오류 수정: 모든 뷰 함수의 전체 내용을 복원 >>>
+def render_smart_matching(filtered_df, user_profile, matching_engine, all_df):
+    st.header("🎯 스마트 매칭 결과")
+    if not user_profile['skills']: st.info("👆 사이드바에 보유 기술을 입력하면 맞춤 공고를 추천해 드립니다."); return
+
+    growth_score, _ = matching_engine.analyze_growth_potential(user_profile)
+    
+    match_results = []
+    for idx, row in filtered_df.iterrows():
+        skill_score, matched, missing = matching_engine.calculate_skill_match(user_profile['skills'], row.get('job_skill_keywords'))
+        if skill_score > 20:
+            success_prob = matching_engine.predict_success_probability(skill_score, growth_score)
+            match_results.append({'idx': idx, 'title': row['title'], 'company': row['company_name'], 'skill_score': skill_score, 'success_prob': success_prob, 'matched': matched, 'missing': missing})
+
+    st.subheader(f"🌟 '{', '.join(user_profile['skills'])}' 스킬과 맞는 추천 공고")
+    if not match_results:
+        st.warning("아쉽지만, 현재 필터 조건에 맞는 추천 공고가 없습니다. 필터를 조정해보세요.")
+        with st.expander("🤔 혹시 이런 건 어떠세요? (대안 제안 기능)"):
+            st.markdown("**다른 직무 찾아보기**"); current_category = filtered_df['job_category'].iloc[0] if not filtered_df.empty else None
+            other_categories = [cat for cat in all_df['job_category'].unique() if cat != current_category]
+            if other_categories: st.write(f"현재 직무 외에도 이런 직무들이 있습니다: `{'`, `'.join(other_categories[:3])}`")
+            st.markdown("**인접 기술 스택 학습하기**"); adjacent_skills = {'React': 'Vue.js', 'Python': 'Go', 'AWS': 'GCP, Azure', 'Docker': 'Kubernetes'}
+            suggestions = [f"`{v}`" for k, v in adjacent_skills.items() if k.lower() in [s.lower() for s in user_profile['skills']]]
+            if suggestions: st.write(f"현재 보유 스킬 기반으로 이런 기술을 추가 학습하면 좋습니다: {', '.join(suggestions)}")
+        return
+
+    for i, res in enumerate(sorted(match_results, key=lambda x: x['success_prob'], reverse=True)[:5]):
+        with st.expander(f"🏆 #{i+1} {res['title']} - 최종 합격 확률: {res['success_prob']}%"):
+            c1, c2 = st.columns([2, 1]);
+            with c1:
+                st.write(f"**회사:** {res['company']}")
+                st.metric(label="JD-스펙 매칭도", value=f"{res['skill_score']:.1f}%")
+                if res['matched']: st.markdown("**🎯 보유 스킬 매치:**" + "".join([f'<div class="skill-match">✅ {s.capitalize()}</div>' for s in res['matched']]), unsafe_allow_html=True)
+                if res['missing']: st.markdown("**📚 추가 학습 필요:**" + "".join([f'<div class="skill-gap">📖 {s.capitalize()}</div>' for s in res['missing'][:3]]), unsafe_allow_html=True)
+            with c2:
+                fig = go.Figure(go.Indicator(mode="gauge+number", value=res['success_prob'], title={'text': "최종 합격 확률"}, domain={'x': [0, 1], 'y': [0, 1]}, gauge={'axis': {'range': [None, 100]}, 'bar': {'color': "#667eea"}}))
+                fig.update_layout(height=200, margin=dict(l=20, r=20, t=40, b=20)); st.plotly_chart(fig, use_container_width=True, key=f"match_gauge_{res['idx']}")
+
+def render_market_analysis(filtered_df):
+    st.header("📊 채용 시장 트렌드 분석");
+    if filtered_df.empty: st.warning("표시할 데이터가 없습니다. 필터를 조정해주세요."); return
+    c1, c2 = st.columns(2)
+    with c1:
+        counts = filtered_df['job_category'].value_counts()
+        fig = px.pie(counts, values=counts.values, names=counts.index, title="직무별 공고 분포", hole=0.4)
+        st.plotly_chart(fig, use_container_width=True, key="cat_pie_market")
+    with c2:
+        counts = filtered_df['address_region'].value_counts().head(10)
+        fig = px.bar(counts, y=counts.index, x=counts.values, orientation='h', title="상위 10개 지역 채용 현황", labels={'y':'지역', 'x':'공고 수'})
+        fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="region_bar_market")
+    st.subheader("🔥 인기 기술 스택 트렌드")
+    if 'job_skill_keywords' in filtered_df.columns:
+        skills = filtered_df['job_skill_keywords'].dropna().str.split(',').explode().str.strip()
+        skill_counts = skills[skills != ''].value_counts().head(15)
+        if not skill_counts.empty:
+            fig = px.bar(skill_counts, x=skill_counts.values, y=skill_counts.index, orientation='h', title="TOP 15 인기 기술", labels={'y':'기술', 'x':'언급 횟수'})
+            fig.update_layout(yaxis={'categoryorder': 'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="skills_bar_market")
+
+def render_growth_path(df, user_profile, user_category, matching_engine):
+    st.header("📈 개인 성장 경로 분석");
+    if not user_profile['skills']: st.info("👆 사이드바에 보유 기술을 입력하면 성장 경로를 분석해 드립니다."); return
+    st.subheader("🚀 당신의 성장 잠재력"); growth_score, factors = matching_engine.analyze_growth_potential(user_profile); c1, c2 = st.columns([1, 2])
+    with c1: fig = go.Figure(go.Indicator(mode="gauge+number", value=growth_score, title={'text': "성장 잠재력"})); st.plotly_chart(fig, use_container_width=True, key="growth_gauge_path")
+    with c2:
+        st.markdown("**🌱 성장 요인 분석:**");
+        if factors: [st.markdown(f'<div class="growth-indicator">{f}</div>', unsafe_allow_html=True) for f in factors]
+        else: st.write("성장 프로필을 입력하면 더 정확한 분석이 가능합니다.")
+    st.subheader("🎯 스킬 갭 분석")
+    if 'job_skill_keywords' in df.columns:
+        target_df = df[df['job_category'] == user_category] if user_category != '전체' else df
+        req_skills = target_df['job_skill_keywords'].dropna().str.split(',').explode().str.strip()
+        req_counts = req_skills[req_skills != ''].value_counts().head(10)
+        if not req_counts.empty:
+            user_s_lower = [s.lower() for s in user_profile['skills']]
+            gap_data = [{'skill': s, 'demand': c, 'status': '보유' if s.lower() in user_s_lower else '학습 필요'} for s, c in req_counts.items()]
+            fig = px.bar(pd.DataFrame(gap_data), x='demand', y='skill', color='status', orientation='h', title=f"'{user_category}' 직무 핵심 스킬과 보유 현황", color_discrete_map={'보유': '#4caf50', '학습 필요': '#ff9800'})
+            fig.update_layout(yaxis={'categoryorder': 'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="skill_gap_bar_path")
+
+def render_company_insight(filtered_df):
+    st.header("🏢 기업별 채용 분석");
+    if filtered_df.empty: st.warning("표시할 데이터가 없습니다. 필터를 조정해주세요."); return
+    top_companies = filtered_df['company_name'].value_counts().head(15)
+    fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
+    fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
+
+@st.cache_data(ttl=3600)
 def fetch_labor_trend_data():
-    """고용노동부 API를 호출하여 실시간 채용 데이터를 가져옵니다."""
     url = "https://eis.work24.go.kr/opi/joApi.do"
-    
-    # Streamlit Secrets에서 인증키를 안전하게 가져옴
-    auth_key = st.secrets.get("EIS_AUTH_KEY")
-    
-    # 인증키가 설정되지 않았을 경우 API 호출 시도하지 않음
-    if not auth_key:
-        logger.warning("EIS_AUTH_KEY is not set in Streamlit Secrets.")
+    auth_key = st.secrets.get("EIS_AUTH_KEY", "YOUR_AUTH_KEY_HERE")
+    if auth_key == "YOUR_AUTH_KEY_HERE":
         return None, "NO_KEY"
-        
-    params = {
-        'authKey': auth_key,
-        'apiSecd': 'OPIA',
-        'rernSecd': 'XML',
-        'display': 100, # 최대 100개 데이터 요청
-        'closStdrYm': datetime.now().strftime('%Y%m') # 현재 년월 기준
-    }
-    
+    params = {'authKey': auth_key, 'apiSecd': 'OPIA', 'rernSecd': 'XML', 'display': 100, 'closStdrYm': datetime.now().strftime('%Y%m')}
     try:
         response = requests.get(url, params=params, timeout=10)
-        
-        # HTML 응답 또는 에러 응답 처리
         if response.status_code != 200 or '<!DOCTYPE html>' in response.text:
-            logger.error(f"API Error: Status {response.status_code}. Response might be HTML.")
             return None, "API_ERROR"
-            
-        # XML 파싱
         root = ET.fromstring(response.text)
-        data_list = []
-        for item in root.findall('.//item'):
-            data = {child.tag: child.text for child in item}
-            data_list.append(data)
-        
+        data_list = [{'company': item.findtext('company'), 'title': item.findtext('title'), 'region': item.findtext('region'), 'sal': item.findtext('sal'), 'minEdubg': item.findtext('minEdubg'), 'career': item.findtext('career')} for item in root.findall('.//item')]
         return data_list, "SUCCESS"
-        
     except (requests.exceptions.RequestException, ET.ParseError) as e:
-        logger.error(f"API Request or XML Parsing failed: {e}")
         return None, "REQUEST_FAIL"
 
 def render_labor_trend_analysis():
     st.header("💡 실시간 노동시장 트렌드 (고용노동부 API)")
-    
     with st.spinner("실시간 고용 데이터를 불러오는 중..."):
         trend_data, status = fetch_labor_trend_data()
     
     if status == "SUCCESS" and trend_data:
         trends_df = pd.DataFrame(trend_data)
-        
         st.subheader("🗺️ 지도 기반 실시간 채용 수요")
         location_dict = {"서울": [37.5665, 126.9780], "부산": [35.1796, 129.0756], "대구": [35.8714, 128.6014], "인천": [37.4563, 126.7052], "광주": [35.1595, 126.8526], "대전": [36.3504, 127.3845], "울산": [35.5384, 129.3114], "세종": [36.4801, 127.2891], "경기": [37.4138, 127.5183], "강원": [37.8228, 128.1555], "충북": [36.6358, 127.4917], "충남": [36.5184, 126.8000], "전북": [35.7167, 127.1442], "전남": [34.8161, 126.4630], "경북": [36.4919, 128.8889], "경남": [35.4606, 128.2132], "제주": [33.4996, 126.5312]}
-        
         trends_df['region_simple'] = trends_df['region'].str.split().str[0].str.replace("특별시", "").str.replace("광역시", "").str.replace("특별자치시", "").str.replace("특별자치도", "")
         region_counts = trends_df['region_simple'].value_counts()
-        
         m = folium.Map(location=[36.5, 127.8], zoom_start=7, tiles="cartodbpositron")
         for region, count in region_counts.items():
-            if region in location_dict:
-                folium.CircleMarker(location=location_dict[region], radius=max(5, count), popup=f"{region}: {count}건", color='#3186cc', fill=True, fill_color='#3186cc', fill_opacity=0.6).add_to(m)
+            if region in location_dict: folium.CircleMarker(location=location_dict[region], radius=max(5, count), popup=f"{region}: {count}건", color='#3186cc', fill=True, fill_color='#3186cc', fill_opacity=0.6).add_to(m)
         st_folium(m, width=1000, height=400, key="folium_map")
+    elif status == "NO_KEY": st.error("🚨 API 인증키가 설정되지 않았습니다. Streamlit Cloud의 Secrets에 `EIS_AUTH_KEY`를 추가해주세요.")
+    else: st.warning(f"⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다 (오류 코드: {status}). 잠시 후 다시 시도해주세요.")
 
-    elif status == "NO_KEY":
-        st.error("🚨 API 인증키가 설정되지 않았습니다. Streamlit Cloud의 Secrets에 `EIS_AUTH_KEY`를 추가해주세요.")
-    else:
-        st.warning(f"⚠️ 고용노동부 API에서 실시간 데이터를 불러오지 못했습니다 (오류 코드: {status}). 잠시 후 다시 시도해주세요.")
-# <<< 수정된 부분 끝 >>>
+def render_prediction_analysis():
+    st.header("🔮 예측 분석 (Coming Soon!)")
+    st.image("https://images.unsplash.com/photo-1531297484001-80022131f5a1?q=80&w=2020&auto=format&fit=crop", caption="AI가 당신의 커리어 미래를 예측합니다.")
+    st.subheader("준비 중인 기능들")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.info("**📈 미래 채용 시장 예측**\n\n- 직무별/기술별 채용 수요가 어떻게 변할지 예측합니다.")
+        st.info("**💰 개인 연봉 예측**\n\n- 나의 스펙과 경력으로 어느 정도의 연봉을 받을 수 있는지 예측합니다.")
+    with c2:
+        st.info("**🌱 기술 성장률 예측**\n\n- 어떤 기술이 미래에 유망할지 성장률을 예측하여 보여줍니다.")
+        st.info("**🏢 기업 문화 적합도 예측**\n\n- 나의 성향과 가장 잘 맞는 기업 문화를 찾아 추천합니다.")
+
+def render_detail_table(filtered_df):
+    st.header("📋 상세 데이터");
+    if filtered_df.empty: st.warning("표시할 데이터가 없습니다. 필터를 조정해주세요."); return
+    st.dataframe(filtered_df, use_container_width=True, height=600)
+    csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("📄 CSV 다운로드", csv, "rallit_jobs_filtered.csv", "text/csv")
 
 
 # ==============================================================================
