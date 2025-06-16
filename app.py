@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 웹 크롤링 기반)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 크롤링 로직 수정)
 
 import streamlit as st
 import pandas as pd
@@ -179,79 +179,73 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-# --- 신규 함수: 웹 크롤링 기반 트렌드 분석 ---
-@st.cache_data(ttl=3600) # 1시간 캐시
+# <<< 오류 수정: 크롤링 선택자 수정 및 안정성 강화 >>>
+@st.cache_data(ttl=3600)
 def fetch_latest_labor_report():
-    """고용행정통계 웹사이트를 크롤링하여 최신 보도자료 정보를 가져옵니다."""
     base_url = "https://eis.work24.go.kr"
     list_url = f"{base_url}/eisps/opiv/selectOpivList.do"
     try:
         response = requests.get(list_url, timeout=10)
-        response.raise_for_status() # HTTP 에러 발생 시 예외 처리
+        response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 가장 첫 번째 tr 요소를 최신 자료로 간주
-        latest_row = soup.select_one("table.board_list tbody tr")
+        # 선택자 수정: 더 일반적인 선택자로 변경하여 안정성 확보
+        # 'table.board_list' -> '.bbs-list'
+        # 'tbody tr' -> 'tr'
+        # 여러 선택지를 시도
+        selectors_to_try = [
+            "table.board_list tbody tr",  # 기존 선택자
+            ".bbs-list tbody tr",         # 새로운 가능한 선택자
+            "div.info-detail tbody tr"    # 더 일반적인 선택자
+        ]
+        latest_row = None
+        for selector in selectors_to_try:
+            latest_row = soup.select_one(selector)
+            if latest_row:
+                break
+
         if not latest_row:
             return None, "목록을 찾을 수 없습니다."
 
         cols = latest_row.find_all('td')
-        title = cols[1].text.strip()
-        onclick_attr = cols[1].find('a')['onclick']
-        seq = re.search(r"fncOpivDetail\('(\d+)'\)", onclick_attr).group(1)
+        # 링크가 있는 td를 찾아서 처리
+        link_td = latest_row.find('a', href=True)
+        if not link_td or 'onclick' not in link_td.attrs:
+             return None, "상세보기 링크를 찾을 수 없습니다."
+
+        title = link_td.text.strip()
+        onclick_attr = link_td['onclick']
         
+        seq_match = re.search(r"fncOpivDetail\('(\d+)'\)", onclick_attr)
+        if not seq_match:
+            return None, "고유 ID(seq)를 추출할 수 없습니다."
+        
+        seq = seq_match.group(1)
         detail_url = f"{base_url}/eisps/opiv/selectOpivDetail.do?seq={seq}"
         
-        # 상세 페이지에서 파일 다운로드 링크 추출
         detail_response = requests.get(detail_url, timeout=10)
         detail_soup = BeautifulSoup(detail_response.text, 'html.parser')
         
-        file_links = []
-        for a_tag in detail_soup.select(".file-list a"):
-            file_name = a_tag.text.strip()
-            file_href = a_tag['href']
-            file_url = f"{base_url}{file_href}"
-            file_links.append({'name': file_name, 'url': file_url})
-            
+        file_links = [{'name': a_tag.text.strip(), 'url': f"{base_url}{a_tag['href']}"} for a_tag in detail_soup.select(".file-list a")]
+        
         return {'title': title, 'detail_url': detail_url, 'files': file_links}, "SUCCESS"
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Crawling failed: {e}")
-        return None, "네트워크 오류"
+        return None, f"네트워크 오류: {e}"
     except Exception as e:
-        logger.error(f"Parsing failed: {e}")
-        return None, "페이지 분석 오류"
+        return None, f"페이지 분석 오류: {e}"
 
 def render_labor_trend_analysis():
     st.header("💡 최신 노동시장 동향 리포트")
-    
     with st.spinner("최신 고용노동부 보도자료를 확인하는 중..."):
         report_info, status = fetch_latest_labor_report()
-        
     if status == "SUCCESS" and report_info:
         st.subheader(f"📄 최신 리포트: {report_info['title']}")
         st.markdown(f"[상세 페이지 바로가기]({report_info['detail_url']})")
-        
         st.markdown("**첨부파일 다운로드:**")
         for file in report_info['files']:
             st.link_button(f"📥 {file['name']}", file['url'])
-        
-        st.markdown("---")
-        st.subheader("📊 노동시장 트렌드 예시")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**상용직 근로자 수 증가 추이**")
-            years = [2020, 2021, 2022, 2023, 2024, 2025]; increase = [20.1, 22.3, 25.7, 28.6, 33.0, 37.5]
-            fig = px.line(x=years, y=increase, markers=True, labels={'x': '연도', 'y': '근로자 수(만 명)'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-        with c2:
-            st.markdown("**고령자 맞춤 공고 비율 (샘플)**")
-            st.metric(label="60세 이상 지원 가능 공고", value="13.2 %")
-            st.progress(0.132)
-            
     else:
         st.warning(f"⚠️ 최신 노동시장 리포트를 불러오지 못했습니다. (상태: {status})")
 
