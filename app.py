@@ -1,4 +1,4 @@
-# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 보험자 통계 API 연동)
+# app.py - Rallit 스마트 채용 대시보드 (최종 완성본, 웹 크롤링 기반)
 
 import streamlit as st
 import pandas as pd
@@ -11,9 +11,7 @@ import logging
 import random
 import re
 import requests
-import xml.etree.ElementTree as ET
-import folium
-from streamlit_folium import st_folium
+from bs4 import BeautifulSoup # 웹 크롤링을 위한 라이브러리
 
 # ==============================================================================
 # 1. 페이지 및 환경 설정
@@ -181,56 +179,81 @@ def render_company_insight(filtered_df):
     fig = px.bar(top_companies, y=top_companies.index, x=top_companies.values, orientation='h', title="채용 공고가 많은 기업 TOP 15", labels={'y':'기업명', 'x':'공고 수'})
     fig.update_layout(yaxis={'categoryorder':'total ascending'}); st.plotly_chart(fig, use_container_width=True, key="company_bar_insight")
 
-# --- 신규 함수: 보험자 통계 API 연동 및 시각화 ---
-@st.cache_data(ttl=3600)
-def fetch_insured_stats(closStdrYm, rsdAreaCd, sxdsCd, ageCd):
-    url = "https://eis.work24.go.kr/opi/ipsApi.do" # 피보험자 API URL로 수정
-    auth_key = st.secrets.get("EIS_AUTH_KEY")
-    if not auth_key: return None, "NO_KEY"
-    
-    params = {
-        'authKey': auth_key, 'apiSecd': 'OPIB', 'rernSecd': 'XML', 'display': 100,
-        'closStdrYm': closStdrYm, 'rsdAreaCd': rsdAreaCd, 'sxdsCd': sxdsCd, 'ageCd': ageCd
-    }
+# --- 신규 함수: 웹 크롤링 기반 트렌드 분석 ---
+@st.cache_data(ttl=3600) # 1시간 캐시
+def fetch_latest_labor_report():
+    """고용행정통계 웹사이트를 크롤링하여 최신 보도자료 정보를 가져옵니다."""
+    base_url = "https://eis.work24.go.kr"
+    list_url = f"{base_url}/eisps/opiv/selectOpivList.do"
     try:
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code != 200 or '<!DOCTYPE html>' in response.text:
-            logger.error(f"API Error: Status {response.status_code}. Response: {response.text[:200]}")
-            return None, "API_ERROR"
-        root = ET.fromstring(response.text)
-        data_list = [{'기준년월': item.findtext('dwClosYm'), '시군구': item.findtext('rsdAreaCdnm'), '성별': item.findtext('sxdn'), '연령': item.findtext('ageCdnm'), '피보험자수': int(item.findtext('prtyIpnb', '0')), '취득자수': int(item.findtext('prtyAcqsNmpr', '0')), '상실자수': int(item.findtext('prtyFrftNmpr', '0'))} for item in root.findall('.//rqst')]
-        return pd.DataFrame(data_list), "SUCCESS"
-    except (requests.exceptions.RequestException, ET.ParseError) as e:
-        logger.error(f"API Request or XML Parsing failed: {e}")
-        return None, "REQUEST_FAIL"
+        response = requests.get(list_url, timeout=10)
+        response.raise_for_status() # HTTP 에러 발생 시 예외 처리
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 가장 첫 번째 tr 요소를 최신 자료로 간주
+        latest_row = soup.select_one("table.board_list tbody tr")
+        if not latest_row:
+            return None, "목록을 찾을 수 없습니다."
 
-def render_insured_stat_analysis():
-    st.header("📊 고용노동부 피보험자 통계 분석")
-    
-    # 사용자 입력 필터
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: closStdrYm = st.text_input("📅 기준년월 (YYYYMM)", value=datetime.now().strftime('%Y%m'))
-    with col2: rsdAreaCd = st.selectbox("🏙️ 지역코드", {"서울 강남구": "11680", "서울 종로구": "11110", "부산 해운대구": "26350"}.keys())
-    with col3: sxdsCd = st.radio("👫 성별", ["1", "2"], format_func=lambda x: "남성" if x=="1" else "여성", horizontal=True)
-    with col4: ageCd = st.selectbox("🎂 연령대", {"25~29세": "04", "30~34세": "05", "35~39세": "06"}.keys())
+        cols = latest_row.find_all('td')
+        title = cols[1].text.strip()
+        onclick_attr = cols[1].find('a')['onclick']
+        seq = re.search(r"fncOpivDetail\('(\d+)'\)", onclick_attr).group(1)
+        
+        detail_url = f"{base_url}/eisps/opiv/selectOpivDetail.do?seq={seq}"
+        
+        # 상세 페이지에서 파일 다운로드 링크 추출
+        detail_response = requests.get(detail_url, timeout=10)
+        detail_soup = BeautifulSoup(detail_response.text, 'html.parser')
+        
+        file_links = []
+        for a_tag in detail_soup.select(".file-list a"):
+            file_name = a_tag.text.strip()
+            file_href = a_tag['href']
+            file_url = f"{base_url}{file_href}"
+            file_links.append({'name': file_name, 'url': file_url})
+            
+        return {'title': title, 'detail_url': detail_url, 'files': file_links}, "SUCCESS"
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Crawling failed: {e}")
+        return None, "네트워크 오류"
+    except Exception as e:
+        logger.error(f"Parsing failed: {e}")
+        return None, "페이지 분석 오류"
 
-    # 딕셔너리 키를 코드로 변환
-    area_code_map = {"서울 강남구": "11680", "서울 종로구": "11110", "부산 해운대구": "26350"}
-    age_code_map = {"25~29세": "04", "30~34세": "05", "35~39세": "06"}
+def render_labor_trend_analysis():
+    st.header("💡 최신 노동시장 동향 리포트")
     
-    with st.spinner("API에서 보험자 통계 데이터를 불러오는 중..."):
-        df, status = fetch_insured_stats(closStdrYm, area_code_map[rsdAreaCd], sxdsCd, age_code_map[ageCd])
-    
-    if status == "SUCCESS" and not df.empty:
-        st.dataframe(df, use_container_width=True)
-        st.subheader("📈 피보험자/취득자/상실자 비교")
-        chart_df = df.melt(id_vars=["시군구", "연령"], value_vars=["피보험자수", "취득자수", "상실자수"], var_name="구분", value_name="인원수")
-        fig = px.bar(chart_df, x="구분", y="인원수", color="구분", title=f"{closStdrYm} {rsdAreaCd} 보험자 지표", labels={'인원수': '인원 수'})
-        st.plotly_chart(fig, use_container_width=True)
-    elif status == "NO_KEY":
-        st.error("🚨 API 인증키가 설정되지 않았습니다. Streamlit Cloud의 Secrets에 `EIS_AUTH_KEY`를 추가해주세요.")
+    with st.spinner("최신 고용노동부 보도자료를 확인하는 중..."):
+        report_info, status = fetch_latest_labor_report()
+        
+    if status == "SUCCESS" and report_info:
+        st.subheader(f"📄 최신 리포트: {report_info['title']}")
+        st.markdown(f"[상세 페이지 바로가기]({report_info['detail_url']})")
+        
+        st.markdown("**첨부파일 다운로드:**")
+        for file in report_info['files']:
+            st.link_button(f"📥 {file['name']}", file['url'])
+        
+        st.markdown("---")
+        st.subheader("📊 노동시장 트렌드 예시")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**상용직 근로자 수 증가 추이**")
+            years = [2020, 2021, 2022, 2023, 2024, 2025]; increase = [20.1, 22.3, 25.7, 28.6, 33.0, 37.5]
+            fig = px.line(x=years, y=increase, markers=True, labels={'x': '연도', 'y': '근로자 수(만 명)'})
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with c2:
+            st.markdown("**고령자 맞춤 공고 비율 (샘플)**")
+            st.metric(label="60세 이상 지원 가능 공고", value="13.2 %")
+            st.progress(0.132)
+            
     else:
-        st.warning(f"데이터를 불러오지 못했습니다. (상태: {status})")
+        st.warning(f"⚠️ 최신 노동시장 리포트를 불러오지 못했습니다. (상태: {status})")
 
 def render_prediction_analysis():
     st.header("🔮 예측 분석 (Coming Soon!)")
@@ -295,10 +318,10 @@ def main():
     active_filters = " | ".join(filter(None, summary_list))
     st.success(f"🔍 **필터 요약:** {active_filters if active_filters else '전체 조건'} | **결과:** `{len(filtered_df)}`개의 공고")
 
-    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "📊 보험자 통계", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
+    tabs = st.tabs(["🎯 스마트 매칭", "📊 시장 분석", "💡 노동시장 동향", "📈 성장 경로", "🏢 기업 인사이트", "🔮 예측 분석", "📋 상세 데이터"])
     with tabs[0]: render_smart_matching(filtered_df, user_profile, matching_engine, df)
     with tabs[1]: render_market_analysis(filtered_df)
-    with tabs[2]: render_insured_stat_analysis()
+    with tabs[2]: render_labor_trend_analysis()
     with tabs[3]: render_growth_path(df, user_profile, user_category, matching_engine)
     with tabs[4]: render_company_insight(filtered_df)
     with tabs[5]: render_prediction_analysis()
