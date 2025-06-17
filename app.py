@@ -908,7 +908,7 @@ def create_advanced_skill_visualization(df: pd.DataFrame):
             height=600,
             showlegend=False
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True, key="advanced_skill_bar")
     
     with col2:
         # 스킬 카테고리별 분류
@@ -945,7 +945,7 @@ def create_advanced_skill_visualization(df: pd.DataFrame):
             hole=0.4
         )
         fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, use_container_width=True, key="skill_category_pie")
 
 def create_market_trend_dashboard(df: pd.DataFrame):
     """시장 트렌드 대시보드"""
@@ -1014,7 +1014,7 @@ def create_market_trend_dashboard(df: pd.DataFrame):
         )
         
         fig_regional.update_layout(height=400, showlegend=False)
-        st.plotly_chart(fig_regional, use_container_width=True)
+        st.plotly_chart(fig_regional, use_container_width=True, key="regional_trends_subplot")
 
 # ==============================================================================
 # 5. 고도화된 페이지 렌더링 함수들
@@ -1052,7 +1052,7 @@ def render_enhanced_main_summary(df: pd.DataFrame):
         )
         fig_category.update_traces(textposition='inside', textinfo='percent+label')
         fig_category.update_layout(height=400)
-        st.plotly_chart(fig_category, use_container_width=True)
+        st.plotly_chart(fig_category, use_container_width=True, key="main_category_pie")
     
     with col2:
         st.subheader("📊 Quick Stats")
@@ -1263,7 +1263,7 @@ def render_enhanced_smart_matching(filtered_df: pd.DataFrame, user_profile: Dict
                     margin=dict(l=20, r=20, t=40, b=20),
                     font={'size': 12}
                 )
-                st.plotly_chart(fig_gauge, use_container_width=True)
+                st.plotly_chart(fig_gauge, use_container_width=True, key=f"success_gauge_{result['idx']}")
                 
                 # 신뢰도 표시
                 st.metric("신뢰도", f"{result['confidence']:.0f}%")
@@ -1400,7 +1400,7 @@ def render_advanced_growth_path(df: pd.DataFrame, user_profile: Dict, target_cat
             showlegend=False,
             height=400
         )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        st.plotly_chart(fig_radar, use_container_width=True, key="growth_radar_chart")
     
     st.markdown("---")
     
@@ -1429,7 +1429,7 @@ def render_advanced_growth_path(df: pd.DataFrame, user_profile: Dict, target_cat
         yaxis_title="완성도 (%)",
         height=400
     )
-    st.plotly_chart(fig_roadmap, use_container_width=True)
+    st.plotly_chart(fig_roadmap, use_container_width=True, key="career_roadmap_bar")
     
     # 다음 학습 추천
     st.subheader("📚 추천 학습 스킬")
@@ -1498,7 +1498,7 @@ def render_advanced_growth_path(df: pd.DataFrame, user_profile: Dict, target_cat
             yaxis={'categoryorder': 'total ascending'},
             height=500
         )
-        st.plotly_chart(fig_gap, use_container_width=True)
+        st.plotly_chart(fig_gap, use_container_width=True, key="skill_gap_analysis_bar")
 
 def render_enhanced_company_insights(filtered_df: pd.DataFrame):
     """고도화된 기업 인사이트 페이지"""
@@ -1574,7 +1574,7 @@ def render_enhanced_company_insights(filtered_df: pd.DataFrame):
             height=500,
             showlegend=False
         )
-        st.plotly_chart(fig_companies, use_container_width=True)
+        st.plotly_chart(fig_companies, use_container_width=True, key="top_companies_bar")
     
     with col2:
         st.subheader("💎 기업 규모별 분포")
@@ -1589,7 +1589,7 @@ def render_enhanced_company_insights(filtered_df: pd.DataFrame):
                 hole=0.4
             )
             fig_size.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_size, use_container_width=True)
+            st.plotly_chart(fig_size, use_container_width=True, key="company_size_pie")
         
         # 지원금 상위 기업
         st.subheader("💰 지원금 TOP 기업")
@@ -1641,7 +1641,7 @@ def render_enhanced_company_insights(filtered_df: pd.DataFrame):
                 title=f"{selected_company} 직무별 채용 현황",
                 labels={'x': '직무', 'y': '공고 수'}
             )
-            st.plotly_chart(fig_company_cat, use_container_width=True)
+            st.plotly_chart(fig_company_cat, use_container_width=True, key=f"company_category_{selected_company.replace(' ', '_')}")
         
         # 요구 스킬 분석
         if 'job_skill_keywords' in company_df.columns:
@@ -1658,7 +1658,7 @@ def render_enhanced_company_insights(filtered_df: pd.DataFrame):
                     title="기술별 요구 빈도"
                 )
                 fig_skills.update_layout(yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig_skills, use_container_width=True)
+                st.plotly_chart(fig_skills, use_container_width=True, key=f"company_skills_{selected_company.replace(' ', '_')}")
 
 def render_enhanced_prediction_analysis(df: pd.DataFrame):
     """고도화된 예측 분석 페이지"""
@@ -1709,7 +1709,7 @@ def render_enhanced_prediction_analysis(df: pd.DataFrame):
                 labels={'current_demand': '현재 수요', 'predicted_growth': '예측 성장률 (%)'}
             )
             fig_prediction.update_traces(textposition="top center")
-            st.plotly_chart(fig_prediction, use_container_width=True)
+            st.plotly_chart(fig_prediction, use_container_width=True, key="skill_prediction_scatter")
     
     with col2:
         st.subheader("💰 지원금 트렌드 예측")
@@ -1759,7 +1759,7 @@ def render_enhanced_prediction_analysis(df: pd.DataFrame):
                 barmode='group',
                 yaxis_title="지원금 (원)"
             )
-            st.plotly_chart(fig_reward, use_container_width=True)
+            st.plotly_chart(fig_reward, use_container_width=True, key="reward_prediction_bar")
     
     st.markdown("---")
     
