@@ -6,7 +6,7 @@
 
 AI 기반 데이터 분석으로 구직자의 성장을 정량화하고, 기업에는 신뢰 가능한 인재 정보를 제공하는 혁신적인 채용 플랫폼
 
-[🎯 라이브 데모](https://your-demo-link.streamlit.app) | [📖 문서](https://docs.example.com) | [🐛 이슈 리포트](https://github.com/your-repo/issues)
+[🎯 라이브 데모](https://app-basic2.streamlit.app)
 
 </div>
 
